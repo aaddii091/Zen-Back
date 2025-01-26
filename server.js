@@ -23,7 +23,7 @@ const connectDB = async () => {
       serverSelectionTimeoutMS: 5000, // 5 seconds
       socketTimeoutMS: 10000, // 10 seconds
     });
-    
+
     isConnected = true;
     console.log('DB connection successful!');
   } catch (error) {
@@ -46,7 +46,7 @@ app.use((err, req, res, next) => {
   console.error('Error:', err);
   res.status(err.statusCode || 500).json({
     status: 'error',
-    message: err.message || 'Something went wrong!'
+    message: err.message || 'Something went wrong!',
   });
 });
 

@@ -230,3 +230,54 @@ exports.getUserQuizzes = catchAsync(async (req, res, next) => {
     quizzes,
   });
 });
+exports.getQuizByID = catchAsync(async (req, res, next) => {
+  let token;
+
+  const { id } = req.body;
+  console.log(req.body);
+
+  // Extract token from Authorization header
+  if (
+    req.headers.authorization &&
+    req.headers.authorization.startsWith('Bearer')
+  ) {
+    token = req.headers.authorization.split(' ')[1];
+  }
+
+  if (!token) {
+    return next(
+      new AppError('You are not logged in! Please log in to get access.', 401)
+    );
+  }
+
+  // Verify and decode the token
+  const decoded = await promisify(jwt.verify)(token, process.env.JWT_SECRET);
+
+  // Fetch user details using decoded ID
+  const user = await User.findById(decoded.id);
+
+  if (!user) {
+    return next(
+      new AppError(
+        'The user belonging to this token does no longer exist.',
+        404
+      )
+    );
+  }
+
+  // Fetch quizzes using the `$in` operator
+  const quiz = await Quiz.find({
+    _id: { $in: id },
+  });
+
+  // If no quiz are found
+  if (!quiz || quiz.length === 0) {
+    return next(new AppError(`No quiz found for the provided ID ${id}.`, 404));
+  }
+
+  // Respond with the quiz
+  res.status(200).json({
+    message: 'User quiz retrieved successfully',
+    quiz,
+  });
+});

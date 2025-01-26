@@ -28,5 +28,6 @@ router.post('/forgotPassword', authController.forgotPassword);
 router.post('/resetPassword/:token', authController.resetPassword);
 
 router.get('/getUserQuizzes', authController.getUserQuizzes);
+router.post('/getQuizByID', authController.getQuizByID);
 
 module.exports = router;
