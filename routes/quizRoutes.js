@@ -20,6 +20,7 @@ router.get('/quiz-test', authController.isAdmin, async (req, res) => {
 
 // Route to create a new quiz
 router.post('/create-quiz', authController.isAdmin, quizController.createQuiz);
+router.post('/submit-quiz', quizController.submitQuiz);
 // router.post('/create-pool-quiz', authController.isAdmin, quizController.createPollQuiz);
 
 module.exports = router;

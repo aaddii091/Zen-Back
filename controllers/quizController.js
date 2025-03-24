@@ -2,6 +2,9 @@ const AppError = require('../utils/appError');
 const catchAsync = require('../utils/catchAsync');
 const User = require('./../models/userModel');
 const Quiz = require('../models/quizModel');
+const AnswerSheet = require('../models/16PFAnswerModel');
+const jwt = require('jsonwebtoken');
+const { promisify } = require('util');
 
 exports.createQuiz = catchAsync(async (req, res, next) => {
   const { type } = req.body;
@@ -140,6 +143,65 @@ exports.createQuiz = catchAsync(async (req, res, next) => {
   }
 });
 
-// exports.createPollQuiz = catchAsync(async (req, res, next) => {
+exports.submitQuiz = catchAsync(async (req, res, next) => {
+  try {
+    const { quizId, quizName, quizType, answers } = req.body;
 
-// });
+    if (!quizId || !quizName || !quizType || !answers) {
+      return res.status(400).json({ message: 'Missing required fields' });
+    }
+    let token;
+    if (
+      req.headers.authorization &&
+      req.headers.authorization.startsWith('Bearer')
+    ) {
+      token = req.headers.authorization.split(' ')[1];
+    }
+
+    if (!token) {
+      return next(
+        new AppError('You are not logged in! Please log in to get access.', 401)
+      );
+    }
+
+    const decoded = await promisify(jwt.verify)(token, process.env.JWT_SECRET);
+
+    const freshUser = await User.findById(decoded.id);
+
+    let userId;
+
+    if (freshUser) {
+      userId = decoded.id;
+    }
+    console.log(freshUser);
+
+    freshUser.attemptedQuizzes.forEach((i) => {
+      if (i.toString() === quizId) {
+        return next(new AppError('User has already given the test', 403));
+      }
+    });
+
+    const newAnswerSheet = new AnswerSheet({
+      quizId,
+      quizName,
+      quizType,
+      userId,
+      answers,
+    });
+
+    const savedAnswerSheet = await newAnswerSheet.save();
+    await User.findByIdAndUpdate(
+      decoded.id,
+      { $addToSet: { attemptedQuizzes: quizId } }, // prevents duplicates
+      { new: true, runValidators: false } // skip validation
+    );
+
+    res.status(201).json({
+      message: 'Answers submitted successfully',
+      data: savedAnswerSheet,
+    });
+  } catch (error) {
+    console.error('Error saving answer sheet:', error);
+    res.status(500).json({ message: 'Error saving answer sheet', error });
+  }
+});
