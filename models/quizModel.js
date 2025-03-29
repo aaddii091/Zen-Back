@@ -5,6 +5,7 @@ const QuestionSchema = new mongoose.Schema({
   text: { type: String, required: true }, // The question text
   trait: { type: String }, // For personality tests, e.g., 'E', 'A', 'C', 'N', 'O'
   positive: { type: Boolean }, // Indicates if the question positively impacts the trait
+  options: { type: Array },
 });
 
 // Define the schema for a quiz
@@ -12,7 +13,7 @@ const QuizSchema = new mongoose.Schema({
   title: { type: String, required: true }, // Title of the quiz
   type: {
     type: String,
-    enum: ['mcq', 'written', 'mixed', 'poll', 'personality_test'], // Supports various quiz types
+    enum: ['mcq', 'written', 'mixed', 'poll', 'personality_test', 'poll PF'], // Supports various quiz types
     required: true,
   }, // Type of quiz
   questions: [QuestionSchema], // Array of questions
