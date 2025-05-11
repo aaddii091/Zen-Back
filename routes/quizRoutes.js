@@ -1,6 +1,7 @@
 const express = require('express');
 const authController = require('../controllers/authController');
 const quizController = require('../controllers/quizController');
+const calc = require('../utils/calculatePersonalityFactors');
 
 const router = express.Router();
 
@@ -21,6 +22,7 @@ router.get('/quiz-test', authController.isAdmin, async (req, res) => {
 // Route to create a new quiz
 router.post('/create-quiz', authController.isAdmin, quizController.createQuiz);
 router.post('/submit-quiz', quizController.submitQuiz);
+router.post('/calculate', calc.calculatePersonalityFactors);
 // router.post('/create-pool-quiz', authController.isAdmin, quizController.createPollQuiz);
 
 module.exports = router;

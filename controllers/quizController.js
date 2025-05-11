@@ -5,6 +5,7 @@ const Quiz = require('../models/quizModel');
 const AnswerSheet = require('../models/16PFAnswerModel');
 const jwt = require('jsonwebtoken');
 const { promisify } = require('util');
+const calculatePersonalityFactors = require('../utils/calculatePersonalityFactors');
 
 exports.createQuiz = catchAsync(async (req, res, next) => {
   const { type } = req.body;
@@ -185,6 +186,8 @@ exports.createQuiz = catchAsync(async (req, res, next) => {
       res.status(500).json({ message: 'Error creating poll quiz', error });
     }
   } else {
+    console.error('Error creating poll quiz:');
+    res.status(500).json({ message: 'Error creating poll quiz' });
   }
 });
 
@@ -240,7 +243,15 @@ exports.submitQuiz = catchAsync(async (req, res, next) => {
       { $addToSet: { attemptedQuizzes: quizId } }, // prevents duplicates
       { new: true, runValidators: false } // skip validation
     );
-
+    if (savedAnswerSheet && quizType === 'poll PF') {
+      (async () => {
+        try {
+          await calculatePersonalityFactors(savedAnswerSheet);
+        } catch (err) {
+          console.error('PF calc error:', err.message);
+        }
+      })();
+    }
     res.status(201).json({
       message: 'Answers submitted successfully',
       data: savedAnswerSheet,
