@@ -5,6 +5,7 @@ const Quiz = require('../models/quizModel');
 const AnswerSheet = require('../models/16PFAnswerModel');
 const jwt = require('jsonwebtoken');
 const { promisify } = require('util');
+const calculatePersonalityFactors = require('../utils/calculatePersonalityFactors');
 
 exports.createQuiz = catchAsync(async (req, res, next) => {
   const { type } = req.body;
@@ -140,6 +141,53 @@ exports.createQuiz = catchAsync(async (req, res, next) => {
       console.error('Error creating poll quiz:', error);
       res.status(500).json({ message: 'Error creating poll quiz', error });
     }
+  } else if (type === 'poll PF') {
+    try {
+      const { title, questions } = req.body;
+
+      // Validate input
+      if (!title || !Array.isArray(questions) || questions.length === 0) {
+        return res.status(400).json({
+          message: 'Invalid input data: Title and questions are required.',
+        });
+      }
+
+      // Validate each question
+      for (const question of questions) {
+        if (!question.text) {
+          return res.status(400).json({
+            message: 'Each question must have text.',
+          });
+        }
+      }
+
+      const pollQuestions = questions.map((question) => ({
+        text: question.text,
+        trait: question.trait,
+        options: question.options,
+      }));
+
+      // Create a new poll quiz document
+      const newQuiz = new Quiz({
+        title,
+        type: 'poll PF', // Define a specific type for poll quizzes
+        questions: pollQuestions,
+        createdBy: req.user._id, // Assuming `req.user` contains the authenticated user's details
+      });
+
+      // Save the poll quiz to the database
+      const savedQuiz = await newQuiz.save();
+
+      res
+        .status(201)
+        .json({ message: 'Poll quiz created successfully!', quiz: savedQuiz });
+    } catch (error) {
+      console.error('Error creating poll quiz:', error);
+      res.status(500).json({ message: 'Error creating poll quiz', error });
+    }
+  } else {
+    console.error('Error creating poll quiz:');
+    res.status(500).json({ message: 'Error creating poll quiz' });
   }
 });
 
@@ -195,7 +243,15 @@ exports.submitQuiz = catchAsync(async (req, res, next) => {
       { $addToSet: { attemptedQuizzes: quizId } }, // prevents duplicates
       { new: true, runValidators: false } // skip validation
     );
-
+    if (savedAnswerSheet && quizType === 'poll PF') {
+      (async () => {
+        try {
+          await calculatePersonalityFactors(savedAnswerSheet);
+        } catch (err) {
+          console.error('PF calc error:', err.message);
+        }
+      })();
+    }
     res.status(201).json({
       message: 'Answers submitted successfully',
       data: savedAnswerSheet,
