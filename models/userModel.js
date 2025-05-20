@@ -8,7 +8,7 @@ const userSchema = new mongoose.Schema({
     type: String,
     required: [true, 'Please tell us your name!'],
   },
-  role: { type: String, enum: ['admin', 'user'], default: 'admin' },
+  role: { type: String, enum: ['admin', 'user'], default: 'user' },
   accessibleQuizzes: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Quiz' }],
   attemptedQuizzes: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Quiz' }],
   email: {
