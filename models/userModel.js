@@ -8,6 +8,7 @@ const userSchema = new mongoose.Schema({
     type: String,
     required: [true, 'Please tell us your name!'],
   },
+  // New users should not receive admin rights automatically
   role: { type: String, enum: ['admin', 'user'], default: 'user' },
   accessibleQuizzes: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Quiz' }],
   attemptedQuizzes: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Quiz' }],

@@ -4,7 +4,12 @@ const ticketController = require('../controllers/ticketController');
 
 const router = express.Router();
 
-router.post('/', authController.protect, ticketController.createTicket);
+router.post(
+  '/',
+  authController.protect,
+  ticketController.uploadTicketFile,
+  ticketController.createTicket
+);
 router.get('/', authController.protect, ticketController.getTickets);
 
 module.exports = router;
