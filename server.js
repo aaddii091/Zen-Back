@@ -15,11 +15,16 @@ let isConnected = false;
 const connectDB = async () => {
   if (isConnected) return;
 
+  if (!process.env.DATABASE) {
+    console.error('DATABASE environment variable is not defined');
+    throw new Error('Missing DATABASE connection string');
+  }
+
   try {
     await mongoose.connect(process.env.DATABASE, {
       useNewUrlParser: true,
       useUnifiedTopology: true,
-      bufferCommands: true, // Changed to true
+      bufferCommands: false,
       serverSelectionTimeoutMS: 5000, // 5 seconds
       socketTimeoutMS: 10000, // 10 seconds
     });
@@ -27,6 +32,7 @@ const connectDB = async () => {
     isConnected = true;
     console.log('DB connection successful!');
   } catch (error) {
+    isConnected = false;
     console.error('MongoDB connection error:', error);
     throw error;
   }
