@@ -9,9 +9,17 @@ const ticketSchema = new mongoose.Schema({
     type: String,
     required: [true, 'Ticket message is required'],
   },
-  file: String,
+  // Store uploaded image in MongoDB
+  file: {
+    data: Buffer,
+    contentType: String,
+  },
   organization: String,
-  createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  createdBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true,
+  },
   createdAt: { type: Date, default: Date.now },
 });
 
