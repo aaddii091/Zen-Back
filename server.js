@@ -38,8 +38,8 @@ const connectDB = async () => {
   }
 };
 
-// Connect to DB immediately when server starts
-connectDB().catch(console.error);
+// Initiate database connection once per cold start
+const connectPromise = connectDB();
 
 // Add request timeout middleware
 app.use((req, res, next) => {
@@ -59,9 +59,25 @@ app.use((err, req, res, next) => {
 // Only start server in development
 if (process.env.NODE_ENV !== 'production') {
   const port = process.env.PORT || 3000;
-  app.listen(port, () => {
-    console.log(`Development server running on port ${port}`);
-  });
+  connectPromise
+    .then(() => {
+      app.listen(port, () => {
+        console.log(`Development server running on port ${port}`);
+      });
+    })
+    .catch((err) => {
+      console.error('Failed to connect to database:', err);
+    });
 }
 
-module.exports = app;
+module.exports = async (req, res) => {
+  try {
+    await connectPromise;
+    return app(req, res);
+  } catch (err) {
+    console.error('Database connection failed:', err);
+    res
+      .status(500)
+      .json({ status: 'error', message: 'Database connection failed' });
+  }
+};
