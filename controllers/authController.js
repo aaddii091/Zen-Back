@@ -28,6 +28,7 @@ exports.login = catchAsync(async (req, res, next) => {
     status: 'success',
     message: 'Logged In Successfully',
     token: token,
+    role: user.role,
   });
 });
 exports.signUp = catchAsync(async (req, res, next) => {

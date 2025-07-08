@@ -52,8 +52,15 @@ Support ticket endpoints are mounted at `/api/v1/tickets`.
   - Retrieve tickets. Non‑admin users receive only their own tickets.
   - Admin users see all tickets and may filter by `organization` or `user` query parameters.
 
+## Documentation
+
+See `docs.md` for a quick reference of all API routes and required authentication.
+
+
 ## Development
 
 The project uses nodemon for development. Running `npm start` will automatically restart the server when files change.
+
+
 
 ***
