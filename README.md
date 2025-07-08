@@ -60,8 +60,15 @@ Organization management endpoints live at `/api/v1/organizations`.
 - `GET /api/v1/organizations` – Retrieve all organizations. Requires authentication.
 - `PUT /api/v1/organizations/:id` – Update the organization `name` by `organizationId`. Requires admin authentication.
 
+## Documentation
+
+See `docs.md` for a quick reference of all API routes and required authentication.
+
+
 ## Development
 
 The project uses nodemon for development. Running `npm start` will automatically restart the server when files change.
+
+
 
 ***
