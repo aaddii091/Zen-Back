@@ -3,12 +3,12 @@ const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/appError');
 
 exports.createOrganization = catchAsync(async (req, res, next) => {
-  const { organizationId, name } = req.body;
-  if (!organizationId || !name) {
-    return next(new AppError('organizationId and name are required', 400));
+  const { organizationName } = req.body;
+  if (!organizationName) {
+    return next(new AppError('organizationName is required', 400));
   }
 
-  const organization = await Organization.create({ organizationId, name });
+  const organization = await Organization.create({ organizationName });
 
   res.status(201).json({ status: 'success', data: organization });
 });
@@ -16,9 +16,11 @@ exports.createOrganization = catchAsync(async (req, res, next) => {
 exports.getOrganizations = catchAsync(async (req, res, next) => {
   const organizations = await Organization.find();
 
-  res
-    .status(200)
-    .json({ status: 'success', results: organizations.length, data: organizations });
+  res.status(200).json({
+    status: 'success',
+    results: organizations.length,
+    data: organizations,
+  });
 });
 
 exports.updateOrganization = catchAsync(async (req, res, next) => {
@@ -29,7 +31,6 @@ exports.updateOrganization = catchAsync(async (req, res, next) => {
   }
 
   const organization = await Organization.findOneAndUpdate(
-    { organizationId: id },
     { name },
     { new: true, runValidators: true }
   );
