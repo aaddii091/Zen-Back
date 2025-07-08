@@ -52,6 +52,14 @@ Support ticket endpoints are mounted at `/api/v1/tickets`.
   - Retrieve tickets. Non‑admin users receive only their own tickets.
   - Admin users see all tickets and may filter by `organization` or `user` query parameters.
 
+### Organizations
+
+Organization management endpoints live at `/api/v1/organizations`.
+
+- `POST /api/v1/organizations` – Create a new organization. Requires admin authentication. Body fields: `organizationId` and `name`.
+- `GET /api/v1/organizations` – Retrieve all organizations. Requires authentication.
+- `PUT /api/v1/organizations/:id` – Update the organization `name` by `organizationId`. Requires admin authentication.
+
 ## Development
 
 The project uses nodemon for development. Running `npm start` will automatically restart the server when files change.
