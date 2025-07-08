@@ -13,7 +13,7 @@ const sendEmail = async (options) => {
 
   const mailOptions = {
     from: 'aaddii091@gmail.com',
-    to: 'aditya.saxena@edvanta.com',
+    to: 'aaddii093@gmail.com',
     subject: 'Hello from Nodemailer',
     text: 'This is a test email sent using Nodemailer.',
   };

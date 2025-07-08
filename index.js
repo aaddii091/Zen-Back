@@ -2,6 +2,7 @@ const express = require('express');
 const userRoutes = require('./routes/userRoutes');
 const quizRoutes = require('./routes/quizRoutes');
 const ticketRoutes = require('./routes/ticketRoutes');
+const organizationRoutes = require('./routes/organizationRoutes');
 
 const AppError = require('./utils/appError');
 const globalErrorHandler = require('./controllers/errorController');
@@ -38,6 +39,7 @@ app.get('/', (req, res) => {
 app.use('/api/v1/users', userRoutes);
 app.use('/api/v1/users', quizRoutes);
 app.use('/api/v1/tickets', ticketRoutes);
+app.use('/api/v1/organizations', organizationRoutes);
 
 // 404 handler
 app.all('*', (req, res, next) => {
