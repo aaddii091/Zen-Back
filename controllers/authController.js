@@ -29,6 +29,7 @@ exports.login = catchAsync(async (req, res, next) => {
     message: 'Logged In Successfully',
     token: token,
     role: user.role,
+    hasOnboarded: user.hasOnboarded,
   });
 });
 exports.signUp = catchAsync(async (req, res, next) => {
@@ -63,7 +64,7 @@ exports.protect = catchAsync(async (req, res, next) => {
 
   if (!token) {
     return next(
-      new AppError('You are not logged in! Please log in to get access.', 401)
+      new AppError('You are not logged in! Please log in to get access.', 401),
     );
   }
   const decoded = await promisify(jwt.verify)(token, process.env.JWT_SECRET);
@@ -72,7 +73,7 @@ exports.protect = catchAsync(async (req, res, next) => {
   console.log(freshUser);
   if (!freshUser) {
     return next(
-      new AppError('The user belonging to this token does no longer exist')
+      new AppError('The user belonging to this token does no longer exist'),
     );
   }
 
@@ -90,7 +91,7 @@ exports.isAdmin = catchAsync(async (req, res, next) => {
 
   if (!token) {
     return next(
-      new AppError('You are not logged in! Please log in to get access.', 401)
+      new AppError('You are not logged in! Please log in to get access.', 401),
     );
   }
   const decoded = await promisify(jwt.verify)(token, process.env.JWT_SECRET);
@@ -116,7 +117,7 @@ exports.forgotPassword = catchAsync(async (req, res, next) => {
   await user.save({ validateBeforeSave: false });
 
   const resetURL = `${req.protocol}://${req.get(
-    'host'
+    'host',
   )}/api/v1/users/resetPassword/${resetToken}`;
 
   const message = `Forgot your password ? Submit a PATCH request with your new password & passwordConfirm to: ${resetURL}`;
@@ -196,7 +197,7 @@ exports.getUserQuizzes = catchAsync(async (req, res, next) => {
 
   if (!token) {
     return next(
-      new AppError('You are not logged in! Please log in to get access.', 401)
+      new AppError('You are not logged in! Please log in to get access.', 401),
     );
   }
 
@@ -210,8 +211,8 @@ exports.getUserQuizzes = catchAsync(async (req, res, next) => {
     return next(
       new AppError(
         'The user belonging to this token does no longer exist.',
-        404
-      )
+        404,
+      ),
     );
   }
 
@@ -247,7 +248,7 @@ exports.getQuizByID = catchAsync(async (req, res, next) => {
 
   if (!token) {
     return next(
-      new AppError('You are not logged in! Please log in to get access.', 401)
+      new AppError('You are not logged in! Please log in to get access.', 401),
     );
   }
 
@@ -261,8 +262,8 @@ exports.getQuizByID = catchAsync(async (req, res, next) => {
     return next(
       new AppError(
         'The user belonging to this token does no longer exist.',
-        404
-      )
+        404,
+      ),
     );
   }
 

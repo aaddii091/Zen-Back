@@ -10,6 +10,7 @@ const userSchema = new mongoose.Schema({
   },
   // New users should not receive admin rights automatically
   role: { type: String, enum: ['admin', 'user'], default: 'user' },
+  hasOnboarded: { type: Boolean, default: false },
   accessibleQuizzes: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Quiz' }],
   attemptedQuizzes: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Quiz' }],
   email: {
@@ -44,7 +45,7 @@ const userSchema = new mongoose.Schema({
 //METHODS
 userSchema.methods.correctPassword = async function (
   candidatePassword,
-  userPassword
+  userPassword,
 ) {
   return await bcrypt.compare(candidatePassword, userPassword);
 };
