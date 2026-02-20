@@ -60,6 +60,13 @@ Organization management endpoints live at `/api/v1/organizations`.
 - `GET /api/v1/organizations` – Retrieve all organizations. Requires authentication.
 - `PUT /api/v1/organizations/:id` – Update the organization `name` by `organizationId`. Requires admin authentication.
 
+### Therapist Profile
+
+Therapist profile endpoints are mounted at `/api/v1/therapist-profile`.
+
+- `GET /api/v1/therapist-profile` – Retrieve the authenticated therapist profile. Requires therapist authentication.
+- `PATCH /api/v1/therapist-profile` – Create or update the authenticated therapist profile. Requires therapist authentication.
+
 ## Documentation
 
 See `docs.md` for a quick reference of all API routes and required authentication.

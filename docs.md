@@ -12,6 +12,11 @@ This document provides a quick overview of the available REST endpoints in the N
 - `GET /getUserQuizzes` – list quizzes accessible to the user (auth required)
 - `POST /getQuizByID` – fetch a quiz by ID (auth required)
 
+## Therapist Profile (`/api/v1/therapist-profile`)
+
+- `GET /` – get logged-in therapist profile (therapist auth required)
+- `PATCH /` – create/update logged-in therapist profile (therapist auth required)
+
 ## Quiz Management (`/api/v1/users`)
 
 - `POST /create-quiz` – create a quiz (admin only)

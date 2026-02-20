@@ -3,6 +3,7 @@ const catchAsync = require('../utils/catchAsync');
 const sendEmail = require('../utils/email');
 const User = require('./../models/userModel');
 const Quiz = require('./../models/quizModel');
+const TherapistProfile = require('./../models/therapistProfileModel');
 const jwt = require('jsonwebtoken');
 const { promisify } = require('util');
 const crypto = require('crypto');
@@ -30,16 +31,27 @@ exports.login = catchAsync(async (req, res, next) => {
     token: token,
     role: user.role,
     hasOnboarded: user.hasOnboarded,
+    user: {
+      id: user._id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+    },
   });
 });
 exports.signUp = catchAsync(async (req, res, next) => {
   console.log(req.body);
+  const allowedSignupRoles = ['user', 'therapist'];
+  const role = allowedSignupRoles.includes(req.body.role)
+    ? req.body.role
+    : undefined;
 
   const newUser = await User.create({
     name: req.body.name,
     email: req.body.email,
     password: req.body.password,
     passwordConfirm: req.body.passwordConfirm,
+    role,
   });
 
   const token = signToken(newUser._id);
@@ -105,6 +117,117 @@ exports.isAdmin = catchAsync(async (req, res, next) => {
   req.user = freshUser;
 
   next();
+});
+exports.isTherapist = catchAsync(async (req, res, next) => {
+  let token;
+  if (
+    req.headers.authorization &&
+    req.headers.authorization.startsWith('Bearer')
+  ) {
+    token = req.headers.authorization.split(' ')[1];
+  }
+
+  if (!token) {
+    return next(
+      new AppError('You are not logged in! Please log in to get access.', 401),
+    );
+  }
+  const decoded = await promisify(jwt.verify)(token, process.env.JWT_SECRET);
+
+  const freshUser = await User.findById(decoded.id);
+  console.log(freshUser);
+  if (!freshUser || freshUser.role !== 'therapist') {
+    return next(new AppError('The user is not a therapist', 403));
+  }
+
+  req.user = freshUser;
+
+  next();
+});
+
+exports.assignTherapistToUser = catchAsync(async (req, res, next) => {
+  const { id } = req.params;
+  const { therapistUserId } = req.body;
+
+  if (!therapistUserId) {
+    return next(new AppError('therapistUserId is required', 400));
+  }
+
+  const targetUser = await User.findById(id);
+  if (!targetUser) {
+    return next(new AppError('User not found', 404));
+  }
+  if (targetUser.role !== 'user') {
+    return next(
+      new AppError('Only users with role "user" can be assigned a therapist', 400),
+    );
+  }
+
+  const therapistUser = await User.findById(therapistUserId);
+  if (!therapistUser) {
+    return next(new AppError('Therapist user not found', 404));
+  }
+  if (therapistUser.role !== 'therapist') {
+    return next(new AppError('Provided therapistUserId is not a therapist', 400));
+  }
+
+  targetUser.assignedTherapist = therapistUser._id;
+  await targetUser.save({ validateBeforeSave: false });
+
+  res.status(200).json({
+    status: 'success',
+    data: {
+      userId: targetUser._id,
+      assignedTherapist: therapistUser._id,
+    },
+  });
+});
+
+exports.getAssignedTherapist = catchAsync(async (req, res, next) => {
+  const user = await User.findById(req.user._id)
+    .select('assignedTherapist')
+    .populate('assignedTherapist', 'name role');
+
+  if (!user?.assignedTherapist) {
+    return res.status(200).json({
+      status: 'success',
+      data: null,
+    });
+  }
+
+  const therapistUser = user.assignedTherapist;
+  const therapistProfile = await TherapistProfile.findOne({
+    user: therapistUser._id,
+  });
+
+  res.status(200).json({
+    status: 'success',
+    data: {
+      therapistUserId: therapistUser._id,
+      displayName: therapistProfile?.displayName || therapistUser.name,
+      title: therapistProfile?.title || 'Therapist',
+      bio: therapistProfile?.bio || '',
+      specializations: therapistProfile?.specializations || [],
+      languages: therapistProfile?.languages || [],
+      sessionModes: therapistProfile?.sessionModes || [],
+      availabilityStatus: therapistProfile?.availabilityStatus || 'available',
+      calendlyUrl: therapistProfile?.calendlyUrl || '',
+    },
+  });
+});
+
+exports.getMe = catchAsync(async (req, res) => {
+  res.status(200).json({
+    status: 'success',
+    data: {
+      id: req.user._id,
+      name: req.user.name,
+      email: req.user.email,
+      role: req.user.role,
+      hasOnboarded: req.user.hasOnboarded,
+      assignedTherapist: req.user.assignedTherapist || null,
+    },
+  });
 });
 
 exports.forgotPassword = catchAsync(async (req, res, next) => {

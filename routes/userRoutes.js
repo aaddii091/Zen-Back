@@ -29,5 +29,12 @@ router.post('/resetPassword/:token', authController.resetPassword);
 
 router.get('/getUserQuizzes', authController.getUserQuizzes);
 router.post('/getQuizByID', authController.getQuizByID);
+router.get('/me', authController.protect, authController.getMe);
+router.get('/assigned-therapist', authController.protect, authController.getAssignedTherapist);
+router.patch(
+  '/:id/assign-therapist',
+  authController.isAdmin,
+  authController.assignTherapistToUser
+);
 
 module.exports = router;
