@@ -18,6 +18,15 @@ const QuizSchema = new mongoose.Schema({
   }, // Type of quiz
   questions: [QuestionSchema], // Array of questions
   defaultOptions: [{ type: String }], // Default options (used for polls or personality tests)
+  estimatedMinutes: {
+    type: Number,
+    min: 1,
+  },
+  isActive: {
+    type: Boolean,
+    default: true,
+    index: true,
+  },
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }, // Admin who created the quiz
 });
 

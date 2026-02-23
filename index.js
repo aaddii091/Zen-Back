@@ -3,6 +3,12 @@ const userRoutes = require('./routes/userRoutes');
 const quizRoutes = require('./routes/quizRoutes');
 const ticketRoutes = require('./routes/ticketRoutes');
 const organizationRoutes = require('./routes/organizationRoutes');
+const voiceRoutes = require('./routes/voiceRoutes');
+const userInfoRoutes = require('./routes/userInfoRoutes');
+const therapistProfileRoutes = require('./routes/therapistProfileRoutes');
+const calendlyRoutes = require('./routes/calendlyRoutes');
+const aiAssistantRoutes = require('./routes/aiAssistantRoutes');
+const therapyChatRoutes = require('./routes/therapyChatRoutes');
 
 const AppError = require('./utils/appError');
 const globalErrorHandler = require('./controllers/errorController');
@@ -12,6 +18,19 @@ const app = express();
 const cors = require('cors');
 
 app.use(cors());
+app.options('*', cors());
+
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  res.header('Access-Control-Allow-Methods', 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS');
+
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(204);
+  }
+
+  next();
+});
 
 // Add basic error handling
 process.on('uncaughtException', (err) => {
@@ -40,6 +59,12 @@ app.use('/api/v1/users', userRoutes);
 app.use('/api/v1/users', quizRoutes);
 app.use('/api/v1/tickets', ticketRoutes);
 app.use('/api/v1/organizations', organizationRoutes);
+app.use('/api/v1/voice', voiceRoutes);
+app.use('/api/v1/user-info', userInfoRoutes);
+app.use('/api/v1/therapist-profile', therapistProfileRoutes);
+app.use('/api/v1/calendly', calendlyRoutes);
+app.use('/api/v1/ai-assistant', aiAssistantRoutes);
+app.use('/api/v1/therapy-chat', therapyChatRoutes);
 
 // 404 handler
 app.all('*', (req, res, next) => {

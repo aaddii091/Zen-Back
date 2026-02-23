@@ -9,7 +9,13 @@ const userSchema = new mongoose.Schema({
     required: [true, 'Please tell us your name!'],
   },
   // New users should not receive admin rights automatically
-  role: { type: String, enum: ['admin', 'user'], default: 'user' },
+  role: { type: String, enum: ['admin', 'user', 'therapist'], default: 'user' },
+  hasOnboarded: { type: Boolean, default: false },
+  assignedTherapist: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    default: null,
+  },
   accessibleQuizzes: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Quiz' }],
   attemptedQuizzes: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Quiz' }],
   email: {
@@ -44,7 +50,7 @@ const userSchema = new mongoose.Schema({
 //METHODS
 userSchema.methods.correctPassword = async function (
   candidatePassword,
-  userPassword
+  userPassword,
 ) {
   return await bcrypt.compare(candidatePassword, userPassword);
 };
