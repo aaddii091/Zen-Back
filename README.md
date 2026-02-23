@@ -1,81 +1,186 @@
 # Zen-Back
 
-Zen-Back is a Node.js/Express backend that provides JWT based authentication, quiz management and a simple support ticket system. MongoDB is used for data storage via Mongoose.
+Express + MongoDB backend for Zengarden.
 
-## Getting Started
+This service powers:
+- user / therapist authentication
+- onboarding and profile data
+- therapist assignment to users
+- therapist profile management
+- Calendly OAuth connection for therapists
+- booking ingestion through Calendly webhooks
+- therapist schedule and bookings APIs
+- quizzes, tickets, organizations, and voice session APIs
 
-1. **Install dependencies**
-   ```bash
-   npm install
-   ```
-2. **Environment variables**
-   Create a `config.env` file in the project root. At minimum the following variables are used:
-   - `DATABASE` – Mongo connection string
-   - `JWT_SECRET` – secret for signing tokens
-   - `JWT_EXPIRES_IN` – token lifetime (e.g. `90d`)
-   - Additional mail settings are required if password reset emails are used (`EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_USERNAME`, `EMAIL_PASSWORD`).
-3. **Run the server**
-   ```bash
-   npm start
-   ```
-   The API will start on the port defined in `config.env` or `3000` by default.
+## Tech Stack
 
-## Project Structure
+- Node.js
+- Express
+- MongoDB + Mongoose
+- JWT auth
 
-```
-controllers/  -> route handler logic
-models/       -> mongoose schemas
-routes/       -> Express route definitions
-utils/        -> helper utilities (error handling, email, etc.)
-index.js      -> express app with routes
-server.js     -> application entry point and database connection
+## Run Locally
+
+1. Install dependencies
+
+```bash
+npm install
 ```
 
-## API Overview
+2. Configure environment in `config.env`
 
-### Authentication
+Required core keys:
+- `PORT`
+- `DATABASE`
+- `JWT_SECRET`
+- `JWT_EXPIRES_IN`
 
-User signup, login and password utilities are handled in `routes/userRoutes.js`.
+Calendly integration keys:
+- `CALENDLY_CLIENT_ID`
+- `CALENDLY_CLIENT_SECRET`
+- `CALENDLY_REDIRECT_URI`
+- `CALENDLY_CONNECT_REDIRECT_FRONTEND`
 
-### Quizzes
+3. Start server
 
-Admins can create quizzes and users can submit answers through the endpoints defined in `routes/quizRoutes.js`.
+```bash
+npm start
+```
 
-### Support Tickets
+Server entry:
+- `server.js` (DB bootstrap)
+- `index.js` (Express app, middleware, route mounting)
 
-Support ticket endpoints are mounted at `/api/v1/tickets`.
+## High-Level Architecture
 
-- `POST /api/v1/tickets`
-  - Create a ticket. Requires authentication.
-  - Body fields: `title` (string), `message` (string), optional `file` and `organization`.
-- `GET /api/v1/tickets`
-  - Retrieve tickets. Non‑admin users receive only their own tickets.
-  - Admin users see all tickets and may filter by `organization` or `user` query parameters.
+Request flow:
+- `routes/*` receives request
+- auth middleware from `controllers/authController.js` validates JWT and role
+- business logic in `controllers/*`
+- persistence via `models/*`
 
-### Organizations
+Main route mounts in `index.js`:
+- `/api/v1/users`
+- `/api/v1/tickets`
+- `/api/v1/organizations`
+- `/api/v1/voice`
+- `/api/v1/user-info`
+- `/api/v1/therapist-profile`
+- `/api/v1/calendly`
 
-Organization management endpoints live at `/api/v1/organizations`.
+## Directory Map
 
-- `POST /api/v1/organizations` – Create a new organization. Requires admin authentication. Body fields: `organizationId` and `name`.
-- `GET /api/v1/organizations` – Retrieve all organizations. Requires authentication.
-- `PUT /api/v1/organizations/:id` – Update the organization `name` by `organizationId`. Requires admin authentication.
+```text
+controllers/
+  authController.js              auth + roles + assignment + me
+  therapistProfileController.js  therapist profile CRUD (self)
+  calendlyController.js          OAuth, status, today sessions, webhook, bookings
+  quizController.js
+  ticketController.js
+  organizationController.js
+  userInfoController.js
 
-### Therapist Profile
+models/
+  userModel.js
+  therapistProfileModel.js
+  appointmentModel.js            persisted bookings from Calendly webhook
+  userInfoModel.js
+  quizModel.js
+  16PFAnswerModel.js
+  ticketModel.js
+  organizationModel.js
 
-Therapist profile endpoints are mounted at `/api/v1/therapist-profile`.
+routes/
+  userRoutes.js
+  therapistProfileRoutes.js
+  calendlyRoutes.js
+  quizRoutes.js
+  ticketRoutes.js
+  organizationRoutes.js
+  userInfoRoutes.js
+  voiceRoutes.js
 
-- `GET /api/v1/therapist-profile` – Retrieve the authenticated therapist profile. Requires therapist authentication.
-- `PATCH /api/v1/therapist-profile` – Create or update the authenticated therapist profile. Requires therapist authentication.
+utils/
+  catchAsync.js
+  appError.js
+  email.js
+```
 
-## Documentation
+## Auth and Roles
 
-See `docs.md` for a quick reference of all API routes and required authentication.
+User roles in `userModel`:
+- `user`
+- `therapist`
+- `admin`
 
+Role middleware in `authController`:
+- `protect`
+- `isAdmin`
+- `isTherapist`
 
-## Development
+## Core API Surface
 
-The project uses nodemon for development. Running `npm start` will automatically restart the server when files change.
+### Users (`/api/v1/users`)
 
+- `POST /signup`
+- `POST /login`
+- `GET /me` (auth)
+- `GET /assigned-therapist` (auth)
+- `PATCH /:id/assign-therapist` (admin)
+- password + quiz endpoints (existing)
 
+### Therapist Profile (`/api/v1/therapist-profile`)
 
-***
+- `GET /` (therapist)
+- `PATCH /` (therapist)
+
+Fields include bio/professional profile and Calendly metadata.
+
+### Calendly (`/api/v1/calendly`)
+
+- `GET /connect-url` (therapist)
+- `GET /callback` (OAuth redirect target)
+- `POST /webhook` (Calendly webhook receiver)
+- `GET /status` (therapist)
+- `GET /today-sessions` (therapist)
+- `GET /my-bookings` (therapist)
+- `POST /disconnect` (therapist)
+
+## Booking Data Model
+
+`appointmentModel` stores booking ownership and schedule data:
+- `user`, `therapist`
+- `userName`, `userEmail`, `therapistName`, `therapistEmail`
+- `scheduledAt`, `endsAt`, `timezone`, `sessionType`, `status`
+- `calendlyEventUri`, `calendlyInviteeUri`
+- `tracking` (utm/context)
+- `rawPayload` (webhook payload snapshot)
+
+## Calendly Integration Flow
+
+Therapist onboarding:
+1. Therapist logs in to admin app.
+2. Admin app requests `/api/v1/calendly/connect-url`.
+3. Therapist authorizes in Calendly.
+4. Calendly redirects to `/api/v1/calendly/callback`.
+5. Backend stores Calendly identity + tokens in `therapistProfile`.
+
+User booking flow:
+1. User app opens therapist `calendlyUrl` with query params (`name`, `email`, tracking IDs).
+2. User books in Calendly.
+3. Calendly sends webhook to `POST /api/v1/calendly/webhook`.
+4. Backend upserts booking in `appointments`.
+5. Therapist dashboard reads `/api/v1/calendly/today-sessions` and `/api/v1/calendly/my-bookings`.
+
+## Important Notes
+
+- `POST /api/v1/calendly/webhook` currently accepts payload without signature verification. Add verification before production hardening.
+- CORS is currently broad/open in `index.js`.
+- `today-sessions` enriches Calendly events with local appointment ownership where available.
+
+## Developer Navigation Tips
+
+- Start with `index.js` to see all mounted modules.
+- For anything auth-related, open `controllers/authController.js` first.
+- For therapist onboarding and booking ingestion, open `controllers/calendlyController.js` and `models/appointmentModel.js`.
+- For assigned therapist lookup used by UserSide, use `getAssignedTherapist` in `authController`.

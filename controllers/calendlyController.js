@@ -21,6 +21,37 @@ const buildClientRedirectUrl = (status, message) => {
   return url.toString();
 };
 
+const isCalendlyInvalidGrant = (payload = {}) => {
+  const errorCode = String(payload?.error || '').toLowerCase();
+  const message = String(
+    payload?.error_description || payload?.message || '',
+  ).toLowerCase();
+
+  return (
+    errorCode === 'invalid_grant' ||
+    message.includes('authorization grant is invalid') ||
+    message.includes('expired') ||
+    message.includes('revoked')
+  );
+};
+
+const clearTherapistCalendlyAuth = async (userId) => {
+  if (!userId) return;
+
+  await TherapistProfile.findOneAndUpdate(
+    { user: userId },
+    {
+      $set: {
+        calendlyConnected: false,
+        calendlyAccessToken: '',
+        calendlyRefreshToken: '',
+        calendlyTokenExpiresAt: null,
+      },
+    },
+    { runValidators: false },
+  );
+};
+
 const buildAuthUrl = (state) => {
   if (
     !process.env.CALENDLY_CLIENT_ID ||
@@ -111,10 +142,12 @@ const refreshAccessToken = async (refreshToken) => {
   const data = await response.json().catch(() => ({}));
 
   if (!response.ok || !data?.access_token) {
-    throw new AppError(
+    const appError = new AppError(
       data?.error_description || data?.message || 'Failed to refresh Calendly access token.',
       400,
     );
+    appError.isCalendlyInvalidGrant = isCalendlyInvalidGrant(data);
+    throw appError;
   }
 
   return data;
@@ -148,7 +181,9 @@ const fetchScheduledEvents = async ({
   const url = new URL('https://api.calendly.com/scheduled_events');
   url.searchParams.set('user', calendlyUserUri);
   url.searchParams.set('min_start_time', minStartTime);
-  url.searchParams.set('max_start_time', maxStartTime);
+  if (maxStartTime) {
+    url.searchParams.set('max_start_time', maxStartTime);
+  }
   url.searchParams.set('status', 'active');
   url.searchParams.set('sort', 'start_time:asc');
   url.searchParams.set('count', '50');
@@ -171,8 +206,8 @@ const fetchScheduledEvents = async ({
   return data?.collection || [];
 };
 
-const getFirstInviteeName = async ({ accessToken, eventUri }) => {
-  if (!eventUri) return '';
+const getFirstInviteeDetails = async ({ accessToken, eventUri }) => {
+  if (!eventUri) return null;
 
   const url = new URL(`${eventUri}/invitees`);
   url.searchParams.set('count', '1');
@@ -186,10 +221,17 @@ const getFirstInviteeName = async ({ accessToken, eventUri }) => {
   });
 
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) return '';
+  if (!response.ok) return null;
 
   const invitee = data?.collection?.[0];
-  return invitee?.name || invitee?.email || '';
+  if (!invitee) return null;
+
+  return {
+    name: invitee?.name || invitee?.email || '',
+    email: invitee?.email || '',
+    rescheduleUrl: invitee?.reschedule_url || '',
+    cancelUrl: invitee?.cancel_url || '',
+  };
 };
 
 const toIsoUtcBoundariesForToday = () => {
@@ -205,6 +247,8 @@ const toIsoUtcBoundariesForToday = () => {
     end: end.toISOString(),
   };
 };
+
+const toIsoNow = () => new Date().toISOString();
 
 const formatTimeLabel = (isoString) => {
   if (!isoString) return 'Time unavailable';
@@ -264,6 +308,13 @@ const getSessionChannel = (event) => {
   return 'Session';
 };
 
+const getJoinUrl = (event) =>
+  pickFirstString(
+    event?.location?.join_url,
+    event?.location?.location,
+    event?.location?.additional_info,
+  );
+
 const pickFirstString = (...values) => {
   for (const value of values) {
     if (typeof value === 'string' && value.trim()) {
@@ -313,7 +364,17 @@ const ensureValidAccessToken = async (profile) => {
     throw new AppError('Calendly token expired. Please reconnect Calendly.', 400);
   }
 
-  const tokenData = await refreshAccessToken(profile.calendlyRefreshToken);
+  let tokenData;
+  try {
+    tokenData = await refreshAccessToken(profile.calendlyRefreshToken);
+  } catch (error) {
+    if (error?.isCalendlyInvalidGrant) {
+      await clearTherapistCalendlyAuth(profile.user);
+      throw new AppError('Calendly authorization expired. Please reconnect Calendly.', 400);
+    }
+    throw error;
+  }
+
   const refreshedToken = tokenData.access_token;
   const refreshedRefreshToken = tokenData.refresh_token || profile.calendlyRefreshToken;
   const expiresInSec = Number(tokenData.expires_in || 3600);
@@ -462,7 +523,7 @@ exports.todaySessions = catchAsync(async (req, res, next) => {
   const mappedSessions = [];
   for (const event of events) {
     const appointment = appointmentByEventUri.get(event?.uri);
-    const inviteeName = await getFirstInviteeName({
+    const invitee = await getFirstInviteeDetails({
       accessToken,
       eventUri: event?.uri,
     });
@@ -476,13 +537,17 @@ exports.todaySessions = catchAsync(async (req, res, next) => {
       clientName:
         appointment?.user?.name ||
         appointment?.userName ||
-        inviteeName ||
+        invitee?.name ||
         'Booked Client',
       userId: appointment?.user?._id || appointment?.user || null,
+      userEmail: appointment?.user?.email || appointment?.userEmail || invitee?.email || '',
       service: event?.name || 'Therapy Session',
       timeLabel: formatTimeLabel(startTime),
       timeRange: formatTimeRange(startTime, endTime),
       channel: getSessionChannel(event),
+      joinUrl: getJoinUrl(event),
+      rescheduleUrl: invitee?.rescheduleUrl || '',
+      cancelUrl: invitee?.cancelUrl || '',
       status: statusMeta.status,
       statusLabel: statusMeta.statusLabel,
       statusHint: '',
@@ -497,7 +562,96 @@ exports.todaySessions = catchAsync(async (req, res, next) => {
     return aTs - bTs;
   });
 
-  const highlight = sorted[0] || null;
+  const highlight =
+    sorted.find((session) => session.status === 'active') ||
+    sorted.find((session) => session.status === 'upcoming') ||
+    null;
+
+  res.status(200).json({
+    status: 'success',
+    data: {
+      date: new Date().toISOString(),
+      highlight,
+      sessions: sorted,
+    },
+  });
+});
+
+exports.upcomingSessions = catchAsync(async (req, res, next) => {
+  const profile = await TherapistProfile.findOne({ user: req.user._id });
+
+  if (!profile || !profile.calendlyConnected || !profile.calendlyUserUri) {
+    return next(new AppError('Calendly is not connected for this therapist.', 400));
+  }
+
+  const accessToken = await ensureValidAccessToken(profile);
+
+  const events = await fetchScheduledEvents({
+    accessToken,
+    calendlyUserUri: profile.calendlyUserUri,
+    minStartTime: toIsoNow(),
+  });
+
+  const eventUris = events
+    .map((event) => event?.uri)
+    .filter((uri) => typeof uri === 'string' && uri.length > 0);
+  const appointments = eventUris.length
+    ? await Appointment.find({ calendlyEventUri: { $in: eventUris } })
+        .populate('user', 'name email')
+        .lean()
+    : [];
+  const appointmentByEventUri = new Map(
+    appointments.map((item) => [item.calendlyEventUri, item]),
+  );
+
+  const mappedSessions = [];
+  for (const event of events) {
+    const appointment = appointmentByEventUri.get(event?.uri);
+    const invitee = await getFirstInviteeDetails({
+      accessToken,
+      eventUri: event?.uri,
+    });
+
+    const startTime = event?.start_time;
+    const endTime = event?.end_time;
+    const statusMeta = computeSessionStatus(startTime, endTime);
+
+    mappedSessions.push({
+      id: event?.uri || event?.uuid || `session-${mappedSessions.length + 1}`,
+      clientName:
+        appointment?.user?.name ||
+        appointment?.userName ||
+        invitee?.name ||
+        'Booked Client',
+      userId: appointment?.user?._id || appointment?.user || null,
+      userEmail: appointment?.user?.email || appointment?.userEmail || invitee?.email || '',
+      service: event?.name || 'Therapy Session',
+      timeLabel: formatTimeLabel(startTime),
+      timeRange: formatTimeRange(startTime, endTime),
+      channel: getSessionChannel(event),
+      joinUrl: getJoinUrl(event),
+      rescheduleUrl: invitee?.rescheduleUrl || '',
+      cancelUrl: invitee?.cancelUrl || '',
+      status: statusMeta.status,
+      statusLabel: statusMeta.statusLabel,
+      statusHint: '',
+      startsAt: startTime || null,
+      endsAt: endTime || null,
+    });
+  }
+
+  const sorted = mappedSessions
+    .filter((session) => session.status === 'upcoming' || session.status === 'active')
+    .sort((a, b) => {
+      const aTs = a.startsAt ? new Date(a.startsAt).getTime() : 0;
+      const bTs = b.startsAt ? new Date(b.startsAt).getTime() : 0;
+      return aTs - bTs;
+    });
+
+  const highlight =
+    sorted.find((session) => session.status === 'active') ||
+    sorted.find((session) => session.status === 'upcoming') ||
+    null;
 
   res.status(200).json({
     status: 'success',

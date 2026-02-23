@@ -3,6 +3,7 @@ const catchAsync = require('../utils/catchAsync');
 const User = require('./../models/userModel');
 const Quiz = require('../models/quizModel');
 const AnswerSheet = require('../models/16PFAnswerModel');
+const TherapistQuizAssignment = require('../models/therapistQuizAssignmentModel');
 const jwt = require('jsonwebtoken');
 const { promisify } = require('util');
 const calculatePersonalityFactors = require('../utils/calculatePersonalityFactors');
@@ -243,6 +244,23 @@ exports.submitQuiz = catchAsync(async (req, res, next) => {
       { $addToSet: { attemptedQuizzes: quizId } }, // prevents duplicates
       { new: true, runValidators: false } // skip validation
     );
+
+    const latestActiveAssignment = await TherapistQuizAssignment.findOne({
+      user: decoded.id,
+      quiz: quizId,
+      status: { $in: ['assigned', 'in_progress'] },
+    }).sort({ assignedAt: -1 });
+
+    if (latestActiveAssignment) {
+      const now = new Date();
+      latestActiveAssignment.status = 'completed';
+      if (!latestActiveAssignment.startedAt) {
+        latestActiveAssignment.startedAt = now;
+      }
+      latestActiveAssignment.completedAt = now;
+      await latestActiveAssignment.save({ validateBeforeSave: false });
+    }
+
     if (savedAnswerSheet && quizType === 'poll PF') {
       (async () => {
         try {

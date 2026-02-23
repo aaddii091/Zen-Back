@@ -9,6 +9,7 @@ router.get('/callback', calendlyController.callback);
 router.post('/webhook', calendlyController.webhook);
 router.get('/status', authController.isTherapist, calendlyController.status);
 router.get('/today-sessions', authController.isTherapist, calendlyController.todaySessions);
+router.get('/upcoming-sessions', authController.isTherapist, calendlyController.upcomingSessions);
 router.get('/my-bookings', authController.isTherapist, calendlyController.myBookings);
 router.post('/disconnect', authController.isTherapist, calendlyController.disconnect);
 
