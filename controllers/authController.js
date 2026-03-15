@@ -3,10 +3,12 @@ const catchAsync = require('../utils/catchAsync');
 const sendEmail = require('../utils/email');
 const User = require('./../models/userModel');
 const Quiz = require('./../models/quizModel');
+const AnswerSheet = require('./../models/16PFAnswerModel');
 const TherapistProfile = require('./../models/therapistProfileModel');
 const Appointment = require('./../models/appointmentModel');
 const UserInfo = require('./../models/userInfoModel');
 const TherapistQuizAssignment = require('./../models/therapistQuizAssignmentModel');
+const { computePersonalityFactorsFromPayload } = require('../utils/calculatePersonalityFactors');
 const jwt = require('jsonwebtoken');
 const mongoose = require('mongoose');
 const { promisify } = require('util');
@@ -16,6 +18,14 @@ const signToken = (id) => {
   return jwt.sign({ id }, process.env.JWT_SECRET, {
     expiresIn: process.env.JWT_EXPIRES_IN,
   });
+};
+
+const buildTherapistPhotoUrl = (profile) => {
+  const data = profile?.photo?.data;
+  const contentType = profile?.photo?.contentType;
+  if (!data || !contentType) return '';
+  const base64 = Buffer.from(data).toString('base64');
+  return `data:${contentType};base64,${base64}`;
 };
 
 const isCalendlyInvalidGrant = (payload = {}) => {
@@ -268,6 +278,19 @@ const mapQuizAssignmentPayload = (assignment, now = new Date()) => {
     revokedAt: assignment?.revokedAt || null,
     updatedAt: assignment?.updatedAt || null,
   };
+};
+
+const sortAssignmentByActiveAndDate = (a, b) => {
+  const aStatus = String(a?.status || '');
+  const bStatus = String(b?.status || '');
+  const aIsActive = ACTIVE_ASSIGNMENT_STATUSES.has(aStatus);
+  const bIsActive = ACTIVE_ASSIGNMENT_STATUSES.has(bStatus);
+
+  if (aIsActive !== bIsActive) return aIsActive ? -1 : 1;
+
+  const aAssignedAt = parseDateOrNull(a?.assignedAt)?.getTime() || 0;
+  const bAssignedAt = parseDateOrNull(b?.assignedAt)?.getTime() || 0;
+  return bAssignedAt - aAssignedAt;
 };
 
 const summarizeQuizAssignments = (assignments = [], now = new Date()) => {
@@ -550,6 +573,64 @@ exports.getAssignedTherapist = catchAsync(async (req, res, next) => {
       sessionModes: therapistProfile?.sessionModes || [],
       availabilityStatus: therapistProfile?.availabilityStatus || 'available',
       calendlyUrl: therapistProfile?.calendlyUrl || '',
+      yearsOfExperience: therapistProfile?.yearsOfExperience ?? null,
+      photoUrl: buildTherapistPhotoUrl(therapistProfile),
+    },
+  });
+});
+
+exports.redeemTherapistInvite = catchAsync(async (req, res, next) => {
+  if (req.user.role !== 'user') {
+    return next(new AppError('Only users can redeem therapist invites.', 403));
+  }
+
+  const rawCode = String(req.body?.code || '').trim().toUpperCase();
+  if (!rawCode) {
+    return next(new AppError('Invite code is required.', 400));
+  }
+
+  const therapistProfile = await TherapistProfile.findOne({
+    inviteCode: rawCode,
+    inviteCodeActive: { $ne: false },
+  }).lean();
+
+  if (!therapistProfile) {
+    return next(new AppError('Invite code not found or inactive.', 404));
+  }
+
+  const therapistUserId = String(therapistProfile.user || '');
+  if (!therapistUserId) {
+    return next(new AppError('Invite code is not linked to a therapist.', 400));
+  }
+
+  if (req.user.assignedTherapist) {
+    if (String(req.user.assignedTherapist) === therapistUserId) {
+      return res.status(200).json({
+        status: 'success',
+        data: {
+          userId: req.user._id,
+          assignedTherapist: req.user.assignedTherapist,
+          alreadyAssigned: true,
+        },
+      });
+    }
+    return next(new AppError('You already have a different therapist assigned.', 400));
+  }
+
+  const therapistUser = await User.findById(therapistUserId);
+  if (!therapistUser || therapistUser.role !== 'therapist') {
+    return next(new AppError('Invite code is not linked to a valid therapist.', 404));
+  }
+
+  req.user.assignedTherapist = therapistUser._id;
+  await req.user.save({ validateBeforeSave: false });
+
+  res.status(200).json({
+    status: 'success',
+    data: {
+      userId: req.user._id,
+      assignedTherapist: therapistUser._id,
+      alreadyAssigned: false,
     },
   });
 });
@@ -1167,6 +1248,7 @@ exports.getMySessionOverview = catchAsync(async (req, res, next) => {
   const nextSession =
     mapped.find((session) => session.stage === 'upcoming') || null;
   let upcoming = mapped.filter((session) => session.stage === 'upcoming');
+  const previous = mapped.filter((session) => session.stage === 'previous');
 
   if (!currentSession && !nextSession && upcoming.length === 0) {
     const assignedTherapistId = req.user?.assignedTherapist;
@@ -1222,6 +1304,7 @@ exports.getMySessionOverview = catchAsync(async (req, res, next) => {
           const fallbackCurrent = sortedFallback.find((session) => session.stage === 'current') || null;
           const fallbackNext = sortedFallback.find((session) => session.stage === 'upcoming') || null;
           const fallbackUpcoming = sortedFallback.filter((session) => session.stage === 'upcoming');
+          const fallbackPrevious = sortedFallback.filter((session) => session.stage === 'previous');
 
           return res.status(200).json({
             status: 'success',
@@ -1229,6 +1312,7 @@ exports.getMySessionOverview = catchAsync(async (req, res, next) => {
               current: fallbackCurrent,
               next: fallbackNext,
               upcoming: fallbackUpcoming,
+              previous: fallbackPrevious,
             },
           });
         }
@@ -1242,6 +1326,7 @@ exports.getMySessionOverview = catchAsync(async (req, res, next) => {
       current: currentSession,
       next: nextSession,
       upcoming,
+      previous,
     },
   });
 });
@@ -1371,10 +1456,117 @@ exports.getUserQuizzes = catchAsync(async (req, res, next) => {
     quizzes,
   });
 });
+
+exports.getMyQuizAssignments = catchAsync(async (req, res, next) => {
+  if (req.user.role !== 'user') {
+    return next(new AppError('Only users can access assigned quizzes.', 403));
+  }
+
+  const assignments = await TherapistQuizAssignment.find({
+    user: req.user._id,
+  })
+    .populate('quiz', 'title type estimatedMinutes isActive questions')
+    .populate('therapist', 'name email')
+    .sort({ assignedAt: -1 })
+    .lean();
+
+  const now = new Date();
+  const assignmentById = new Map(assignments.map((item) => [String(item?._id || ''), item]));
+  const mapped = assignments
+    .map((assignment) => mapQuizAssignmentPayload(assignment, now))
+    .map((assignment) => ({
+      ...assignment,
+      therapist: {
+        id: assignment?.therapistId || null,
+        name:
+          assignmentById.get(String(assignment?.id || ''))?.therapist?.name
+          || 'Therapist',
+      },
+      quiz: {
+        ...assignment.quiz,
+        questionCount: Array.isArray(
+          assignmentById.get(String(assignment?.id || ''))?.quiz?.questions,
+        )
+          ? assignmentById.get(String(assignment?.id || '')).quiz.questions.length
+          : 0,
+      },
+    }))
+    .sort(sortAssignmentByActiveAndDate);
+
+  res.status(200).json({
+    status: 'success',
+    results: mapped.length,
+    data: {
+      summary: summarizeQuizAssignments(assignments, now),
+      assignments: mapped,
+    },
+  });
+});
+
+exports.getMyQuizAssignmentResult = catchAsync(async (req, res, next) => {
+  if (req.user.role !== 'user') {
+    return next(new AppError('Only users can access quiz results.', 403));
+  }
+
+  const assignmentObjectId = asObjectIdOrNull(req.params?.assignmentId);
+  if (!assignmentObjectId) {
+    return next(new AppError('Invalid assignment id.', 400));
+  }
+
+  const assignment = await TherapistQuizAssignment.findOne({
+    _id: assignmentObjectId,
+    user: req.user._id,
+  })
+    .populate('quiz', 'title type')
+    .populate('therapist', 'name')
+    .lean();
+
+  if (!assignment) {
+    return next(new AppError('Quiz assignment not found.', 404));
+  }
+
+  const answerSheet =
+    (await AnswerSheet.findOne({
+      assignmentId: assignmentObjectId,
+      userId: req.user._id,
+    })
+      .sort({ createdAt: -1 })
+      .lean())
+    || (await AnswerSheet.findOne({
+      userId: req.user._id,
+      quizId: assignment.quiz?._id || assignment.quiz,
+    })
+      .sort({ createdAt: -1 })
+      .lean());
+
+  if (!answerSheet) {
+    return next(new AppError('No submitted result found for this quiz assignment.', 404));
+  }
+
+  let result = null;
+  if (String(answerSheet?.quizType || '') === 'poll PF') {
+    try {
+      result = computePersonalityFactorsFromPayload(answerSheet);
+    } catch {
+      result = null;
+    }
+  }
+
+  res.status(200).json({
+    status: 'success',
+    data: {
+      assignment: mapQuizAssignmentPayload(assignment, new Date()),
+      result,
+      submittedAt: answerSheet?.createdAt || null,
+      quizType: answerSheet?.quizType || assignment?.quiz?.type || '',
+    },
+  });
+});
+
 exports.getQuizByID = catchAsync(async (req, res, next) => {
   let token;
 
-  const { id } = req.body;
+  const { id, assignmentId } = req.body || {};
   console.log(req.body);
 
   // Extract token from Authorization header
@@ -1406,41 +1598,93 @@ exports.getQuizByID = catchAsync(async (req, res, next) => {
     );
   }
 
-  // Fetch quizzes using the `$in` operator
-  const quiz = await Quiz.find({
-    _id: { $in: id },
-  });
+  const assignmentObjectId = asObjectIdOrNull(assignmentId);
+  let selectedAssignment = null;
+  let quiz = [];
+
+  if (assignmentObjectId) {
+    selectedAssignment = await TherapistQuizAssignment.findOne({
+      _id: assignmentObjectId,
+      user: decoded.id,
+    })
+      .populate('quiz')
+      .populate('therapist', 'name')
+      .lean();
+
+    if (!selectedAssignment) {
+      return next(new AppError('Quiz assignment not found.', 404));
+    }
+
+    if (selectedAssignment?.status === 'revoked') {
+      return next(new AppError('This quiz assignment has been revoked.', 400));
+    }
+
+    if (selectedAssignment?.status === 'completed') {
+      return next(new AppError('This quiz assignment is already completed.', 400));
+    }
+
+    if (selectedAssignment?.quiz?.isActive === false) {
+      return next(new AppError('This quiz is inactive.', 400));
+    }
+
+    quiz = [selectedAssignment.quiz];
+
+    if (selectedAssignment.status === 'assigned') {
+      await TherapistQuizAssignment.findByIdAndUpdate(
+        selectedAssignment._id,
+        {
+          $set: { status: 'in_progress' },
+          $currentDate: { startedAt: true },
+        },
+        { new: false, runValidators: false },
+      );
+    }
+  } else {
+    // Fetch quizzes using the `$in` operator
+    quiz = await Quiz.find({
+      _id: { $in: id },
+    });
+
+    const requestedQuizIds = (Array.isArray(id) ? id : [id])
+      .map((item) => asObjectIdOrNull(item))
+      .filter(Boolean);
+
+    if (requestedQuizIds.length) {
+      await TherapistQuizAssignment.updateMany(
+        {
+          user: decoded.id,
+          quiz: { $in: requestedQuizIds },
+          status: 'assigned',
+        },
+        {
+          $set: {
+            status: 'in_progress',
+          },
+          $currentDate: {
+            startedAt: true,
+          },
+        },
+      );
+    }
+  }
 
   // If no quiz are found
   if (!quiz || quiz.length === 0) {
     return next(new AppError(`No quiz found for the provided ID ${id}.`, 404));
   }
 
-  const requestedQuizIds = (Array.isArray(id) ? id : [id])
-    .map((item) => asObjectIdOrNull(item))
-    .filter(Boolean);
-
-  if (requestedQuizIds.length) {
-    await TherapistQuizAssignment.updateMany(
-      {
-        user: decoded.id,
-        quiz: { $in: requestedQuizIds },
-        status: 'assigned',
-      },
-      {
-        $set: {
-          status: 'in_progress',
-        },
-        $currentDate: {
-          startedAt: true,
-        },
-      },
-    );
-  }
-
   // Respond with the quiz
   res.status(200).json({
     message: 'User quiz retrieved successfully',
+    assignment: selectedAssignment
+      ? {
+          id: selectedAssignment?._id,
+          status: selectedAssignment?.status || 'assigned',
+          dueAt: selectedAssignment?.dueAt || null,
+          note: selectedAssignment?.note || '',
+          therapistName: selectedAssignment?.therapist?.name || 'Therapist',
+        }
+      : null,
     quiz,
   });
 });

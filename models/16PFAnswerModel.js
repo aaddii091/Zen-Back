@@ -38,6 +38,12 @@ const answerSheetSchema = new mongoose.Schema(
       ref: 'User',
       required: false, // make it required: true if you always track user
     },
+    assignmentId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'TherapistQuizAssignment',
+      required: false,
+      index: true,
+    },
     answers: {
       type: Map,
       of: answerSchema,

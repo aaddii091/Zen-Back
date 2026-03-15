@@ -93,6 +93,23 @@ const therapistProfileSchema = new mongoose.Schema(
       enum: ['available', 'busy', 'offline'],
       default: 'available',
     },
+    inviteCode: {
+      type: String,
+      trim: true,
+      uppercase: true,
+    },
+    inviteCodeCreatedAt: {
+      type: Date,
+    },
+    inviteCodeActive: {
+      type: Boolean,
+      default: true,
+    },
+    photo: {
+      data: Buffer,
+      contentType: String,
+      updatedAt: Date,
+    },
   },
   { timestamps: true },
 );
