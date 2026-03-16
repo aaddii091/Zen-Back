@@ -67,6 +67,7 @@ const buildAuthUrl = (state) => {
   url.searchParams.set('client_id', process.env.CALENDLY_CLIENT_ID);
   url.searchParams.set('response_type', 'code');
   url.searchParams.set('redirect_uri', process.env.CALENDLY_REDIRECT_URI);
+  url.searchParams.set('prompt', 'login');
   url.searchParams.set('state', state);
   return url.toString();
 };
