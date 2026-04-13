@@ -73,6 +73,11 @@ router.post(
   authController.protect,
   authController.redeemTherapistInvite,
 );
+router.post(
+  '/select-organization-therapist',
+  authController.protect,
+  authController.selectOrganizationTherapist,
+);
 router.patch(
   '/:id/assign-therapist',
   authController.isAdmin,

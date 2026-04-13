@@ -8,6 +8,7 @@ const TherapistProfile = require('./../models/therapistProfileModel');
 const Appointment = require('./../models/appointmentModel');
 const UserInfo = require('./../models/userInfoModel');
 const TherapistQuizAssignment = require('./../models/therapistQuizAssignmentModel');
+const Organization = require('../models/organizationModel');
 const { computePersonalityFactorsFromPayload } = require('../utils/calculatePersonalityFactors');
 const jwt = require('jsonwebtoken');
 const mongoose = require('mongoose');
@@ -575,6 +576,8 @@ exports.getAssignedTherapist = catchAsync(async (req, res, next) => {
       calendlyUrl: therapistProfile?.calendlyUrl || '',
       yearsOfExperience: therapistProfile?.yearsOfExperience ?? null,
       photoUrl: buildTherapistPhotoUrl(therapistProfile),
+      profileType: therapistProfile?.profileType || 'professional_therapist',
+      isDemoProfile: Boolean(therapistProfile?.isDemoProfile),
     },
   });
 });
@@ -644,7 +647,61 @@ exports.getMe = catchAsync(async (req, res) => {
       email: req.user.email,
       role: req.user.role,
       hasOnboarded: req.user.hasOnboarded,
+      organization: req.user.organization || null,
+      hasSelectedOrgTherapist: Boolean(req.user.hasSelectedOrgTherapist),
       assignedTherapist: req.user.assignedTherapist || null,
+    },
+  });
+});
+
+exports.selectOrganizationTherapist = catchAsync(async (req, res, next) => {
+  if (req.user.role !== 'user') {
+    return next(new AppError('Only users can select organization therapists.', 403));
+  }
+
+  const therapistUserId = String(req.body?.therapistUserId || '').trim();
+  if (!therapistUserId) {
+    return next(new AppError('therapistUserId is required.', 400));
+  }
+
+  if (!req.user.organization) {
+    return next(new AppError('Join an organization before selecting a therapist.', 400));
+  }
+
+  if (req.user.hasSelectedOrgTherapist) {
+    return next(new AppError('Therapist selection is locked after your first choice.', 400));
+  }
+
+  const organization = await Organization.findById(req.user.organization)
+    .select('therapistRoster')
+    .lean();
+
+  if (!organization) {
+    return next(new AppError('Organization not found.', 404));
+  }
+
+  const isInRoster = Array.isArray(organization.therapistRoster) && organization.therapistRoster
+    .some((item) => String(item) === therapistUserId);
+
+  if (!isInRoster) {
+    return next(new AppError('Selected therapist is not part of your organization.', 403));
+  }
+
+  const therapistUser = await User.findById(therapistUserId).select('role');
+  if (!therapistUser || therapistUser.role !== 'therapist') {
+    return next(new AppError('Selected therapist is invalid.', 404));
+  }
+
+  req.user.assignedTherapist = therapistUser._id;
+  req.user.hasSelectedOrgTherapist = true;
+  await req.user.save({ validateBeforeSave: false });
+
+  res.status(200).json({
+    status: 'success',
+    data: {
+      userId: req.user._id,
+      assignedTherapist: therapistUser._id,
+      hasSelectedOrgTherapist: true,
     },
   });
 });

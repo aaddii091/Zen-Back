@@ -19,6 +19,15 @@ const therapistProfileSchema = new mongoose.Schema(
       trim: true,
       default: 'Therapist',
     },
+    profileType: {
+      type: String,
+      enum: ['study_coach', 'professional_therapist'],
+      default: 'professional_therapist',
+    },
+    isDemoProfile: {
+      type: Boolean,
+      default: false,
+    },
     specializations: [
       {
         type: String,
