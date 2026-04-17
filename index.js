@@ -9,6 +9,9 @@ const therapistProfileRoutes = require('./routes/therapistProfileRoutes');
 const calendlyRoutes = require('./routes/calendlyRoutes');
 const aiAssistantRoutes = require('./routes/aiAssistantRoutes');
 const therapyChatRoutes = require('./routes/therapyChatRoutes');
+const aiTherapyRoutes = require('./routes/aiTherapyRoutes');
+const therapistSessionReportRoutes = require('./routes/therapistSessionReportRoutes');
+const shortCourseProgressRoutes = require('./routes/shortCourseProgressRoutes');
 
 const AppError = require('./utils/appError');
 const globalErrorHandler = require('./controllers/errorController');
@@ -65,6 +68,9 @@ app.use('/api/v1/therapist-profile', therapistProfileRoutes);
 app.use('/api/v1/calendly', calendlyRoutes);
 app.use('/api/v1/ai-assistant', aiAssistantRoutes);
 app.use('/api/v1/therapy-chat', therapyChatRoutes);
+app.use('/api/v1/ai-therapy', aiTherapyRoutes);
+app.use('/api/v1/therapist-session-reports', therapistSessionReportRoutes);
+app.use('/api/v1/short-courses', shortCourseProgressRoutes);
 
 // 404 handler
 app.all('*', (req, res, next) => {

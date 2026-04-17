@@ -1,5 +1,79 @@
 const catchAsync = require('../utils/catchAsync');
 const TherapistProfile = require('../models/therapistProfileModel');
+const multer = require('multer');
+const AppError = require('../utils/appError');
+
+const photoStorage = multer.memoryStorage();
+const photoFilter = (req, file, cb) => {
+  if (file?.mimetype?.startsWith('image/')) {
+    cb(null, true);
+  } else {
+    cb(new AppError('Only image files are allowed.', 400), false);
+  }
+};
+
+exports.uploadTherapistPhoto = multer({
+  storage: photoStorage,
+  fileFilter: photoFilter,
+}).single('photo');
+
+const buildPhotoUrl = (profile) => {
+  const data = profile?.photo?.data;
+  const contentType = profile?.photo?.contentType;
+  if (!data || !contentType) return '';
+  const base64 = Buffer.from(data).toString('base64');
+  return `data:${contentType};base64,${base64}`;
+};
+
+const generateInviteCode = () => {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let code = '';
+  for (let i = 0; i < 8; i += 1) {
+    code += alphabet[Math.floor(Math.random() * alphabet.length)];
+  }
+  return code;
+};
+
+const REQUIRED_FIELDS = [
+  'displayName',
+  'title',
+  'bio',
+  'specializations',
+  'yearsOfExperience',
+  'languages',
+  'sessionModes',
+  'timezone',
+  'availabilityStatus',
+  'calendlyUrl',
+  'photo',
+];
+
+const getMissingFields = (profile) => {
+  if (!profile) return [...REQUIRED_FIELDS];
+
+  const missing = [];
+  if (!profile.displayName) missing.push('displayName');
+  if (!profile.title) missing.push('title');
+  if (!profile.bio) missing.push('bio');
+  if (!Array.isArray(profile.specializations) || profile.specializations.length === 0) {
+    missing.push('specializations');
+  }
+  if (profile.yearsOfExperience === undefined || profile.yearsOfExperience === null) {
+    missing.push('yearsOfExperience');
+  }
+  if (!Array.isArray(profile.languages) || profile.languages.length === 0) {
+    missing.push('languages');
+  }
+  if (!Array.isArray(profile.sessionModes) || profile.sessionModes.length === 0) {
+    missing.push('sessionModes');
+  }
+  if (!profile.timezone) missing.push('timezone');
+  if (!profile.availabilityStatus) missing.push('availabilityStatus');
+  if (!profile.calendlyUrl) missing.push('calendlyUrl');
+  if (!profile.photo?.data) missing.push('photo');
+
+  return missing;
+};
 
 const normalizeStringList = (value) => {
   if (value === undefined) return value;
@@ -61,20 +135,72 @@ const buildUpdatePayload = (body = {}) => {
 
 exports.getMyProfile = catchAsync(async (req, res) => {
   const therapistProfile = await TherapistProfile.findOne({ user: req.user._id });
+  const missingFields = getMissingFields(therapistProfile);
 
   res.status(200).json({
     status: 'success',
-    data: therapistProfile,
+    data: therapistProfile
+      ? {
+        ...therapistProfile.toObject(),
+        photoUrl: buildPhotoUrl(therapistProfile),
+      }
+      : null,
+    profileComplete: missingFields.length === 0,
+    missingFields,
   });
 });
 
 exports.insertMyProfile = catchAsync(async (req, res) => {
   const updatePayload = buildUpdatePayload(req.body);
 
+  const setOnInsert = {
+    user: req.user._id,
+  };
+  if (updatePayload.displayName === undefined) {
+    setOnInsert.displayName = req.user.name;
+  }
+
   const therapistProfile = await TherapistProfile.findOneAndUpdate(
     { user: req.user._id },
     {
       $set: updatePayload,
+      $setOnInsert: setOnInsert,
+    },
+    {
+      new: true,
+      upsert: true,
+      runValidators: true,
+      setDefaultsOnInsert: true,
+    },
+  );
+  const missingFields = getMissingFields(therapistProfile);
+
+  res.status(200).json({
+    status: 'success',
+    data: {
+      ...therapistProfile.toObject(),
+      photoUrl: buildPhotoUrl(therapistProfile),
+    },
+    profileComplete: missingFields.length === 0,
+    missingFields,
+  });
+});
+
+exports.updateMyPhoto = catchAsync(async (req, res, next) => {
+  if (!req.file) {
+    return next(new AppError('Profile photo is required.', 400));
+  }
+
+  const therapistProfile = await TherapistProfile.findOneAndUpdate(
+    { user: req.user._id },
+    {
+      $set: {
+        photo: {
+          data: req.file.buffer,
+          contentType: req.file.mimetype,
+          updatedAt: new Date(),
+        },
+      },
       $setOnInsert: {
         user: req.user._id,
         displayName: req.user.name,
@@ -88,8 +214,67 @@ exports.insertMyProfile = catchAsync(async (req, res) => {
     },
   );
 
+  const missingFields = getMissingFields(therapistProfile);
+
   res.status(200).json({
     status: 'success',
-    data: therapistProfile,
+    data: {
+      ...therapistProfile.toObject(),
+      photoUrl: buildPhotoUrl(therapistProfile),
+    },
+    profileComplete: missingFields.length === 0,
+    missingFields,
+  });
+});
+
+exports.getInviteCode = catchAsync(async (req, res) => {
+  let profile = await TherapistProfile.findOne({ user: req.user._id });
+
+  if (!profile) {
+    profile = await TherapistProfile.create({
+      user: req.user._id,
+      displayName: req.user.name,
+    });
+  }
+
+  if (!profile.inviteCode || profile.inviteCodeActive === false) {
+    profile.inviteCode = generateInviteCode();
+    profile.inviteCodeCreatedAt = new Date();
+    profile.inviteCodeActive = true;
+    await profile.save({ validateBeforeSave: false });
+  }
+
+  res.status(200).json({
+    status: 'success',
+    data: {
+      inviteCode: profile.inviteCode,
+      createdAt: profile.inviteCodeCreatedAt || null,
+      active: profile.inviteCodeActive !== false,
+    },
+  });
+});
+
+exports.refreshInviteCode = catchAsync(async (req, res) => {
+  let profile = await TherapistProfile.findOne({ user: req.user._id });
+
+  if (!profile) {
+    profile = await TherapistProfile.create({
+      user: req.user._id,
+      displayName: req.user.name,
+    });
+  }
+
+  profile.inviteCode = generateInviteCode();
+  profile.inviteCodeCreatedAt = new Date();
+  profile.inviteCodeActive = true;
+  await profile.save({ validateBeforeSave: false });
+
+  res.status(200).json({
+    status: 'success',
+    data: {
+      inviteCode: profile.inviteCode,
+      createdAt: profile.inviteCodeCreatedAt || null,
+      active: profile.inviteCodeActive !== false,
+    },
   });
 });

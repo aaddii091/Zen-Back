@@ -2,54 +2,63 @@
 const catchAsync = require('../utils/catchAsync');
 const stenChart = require('../charts/StenChart');
 
-exports.calculatePersonalityFactors = catchAsync(async (req, res, next) => {
-  console.log(req.body);
+const buildTraitScores = (answers) => {
+  const traitScores = {};
+  const source = answers instanceof Map ? Object.fromEntries(answers.entries()) : answers || {};
 
-  if (req.body.quizType === 'poll PF') {
-    // For now, just log. You’ll write the actual scoring logic later
-    console.log('Processing PF scoring for:', req.body._id);
+  for (const questionId in source) {
+    const entry = source[questionId] || {};
+    const trait = String(entry?.trait || '').trim();
+    const point = Number.parseInt(entry?.point, 10);
+    if (!trait) continue;
+    traitScores[trait] = (traitScores[trait] || 0) + (Number.isFinite(point) ? point : 0);
+  }
 
-    const traitScores = {};
+  return traitScores;
+};
 
-    for (const questionId in req.body.answers) {
-      const { trait, point } = req.body.answers[questionId];
-      if (trait) {
-        traitScores[trait] = (traitScores[trait] || 0) + parseInt(point);
+const getStenScores = (rawScores) => {
+  const stenScores = {};
+
+  for (const [trait, value] of Object.entries(rawScores || {})) {
+    const ranges = stenChart[trait];
+    if (!ranges) continue;
+
+    for (let i = 0; i < ranges.length; i += 1) {
+      const [min, max] = ranges[i];
+      if (value >= min && value <= max) {
+        stenScores[trait] = i + 1;
+        break;
       }
     }
+  }
 
-    console.log('Trait scores:', traitScores);
+  return stenScores;
+};
 
-    function getStenScores(rawScores) {
-      const stenScores = {};
+const computePersonalityFactorsFromPayload = (payload = {}) => {
+  if (String(payload?.quizType || '') !== 'poll PF') {
+    throw new Error('Invalid quiz type for PF scoring.');
+  }
 
-      for (const [trait, value] of Object.entries(rawScores)) {
-        const ranges = stenChart[trait];
-        if (!ranges) continue;
+  const rawScore = buildTraitScores(payload?.answers);
+  const stenScore = getStenScores(rawScore);
 
-        for (let i = 0; i < ranges.length; i++) {
-          const [min, max] = ranges[i];
-          if (value >= min && value <= max) {
-            stenScores[trait] = i + 1;
-            break;
-          }
-        }
-      }
-      console.log(stenScores);
+  return {
+    RawScore: rawScore,
+    StenScore: stenScore,
+  };
+};
 
-      return stenScores;
-    }
-    // now calculating Sten Score
-    if (req.body.gender === 'Male') {
-      const StenScore = getStenScores(traitScores);
-      return res.status(200).json({
-        RawScore: traitScores,
-        StenScore: StenScore,
-      });
-    }
-  } else {
+exports.computePersonalityFactorsFromPayload = computePersonalityFactorsFromPayload;
+
+exports.calculatePersonalityFactors = catchAsync(async (req, res) => {
+  try {
+    const result = computePersonalityFactorsFromPayload(req.body || {});
+    return res.status(200).json(result);
+  } catch (error) {
     return res.status(400).json({
-      message: 'Invalid quiz type. Valid types are mcq, written, or mixed.',
+      message: error?.message || 'Unable to calculate personality factors.',
     });
   }
 });

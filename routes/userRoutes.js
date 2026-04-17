@@ -28,6 +28,12 @@ router.post('/forgotPassword', authController.forgotPassword);
 router.post('/resetPassword/:token', authController.resetPassword);
 
 router.get('/getUserQuizzes', authController.getUserQuizzes);
+router.get('/my-quiz-assignments', authController.protect, authController.getMyQuizAssignments);
+router.get(
+  '/my-quiz-assignments/:assignmentId/result',
+  authController.protect,
+  authController.getMyQuizAssignmentResult,
+);
 router.post('/getQuizByID', authController.getQuizByID);
 router.get('/me', authController.protect, authController.getMe);
 router.get('/my-session-overview', authController.protect, authController.getMySessionOverview);
@@ -62,6 +68,16 @@ router.get(
   authController.getTherapistClientOverview,
 );
 router.get('/assigned-therapist', authController.protect, authController.getAssignedTherapist);
+router.post(
+  '/redeem-therapist-invite',
+  authController.protect,
+  authController.redeemTherapistInvite,
+);
+router.post(
+  '/select-organization-therapist',
+  authController.protect,
+  authController.selectOrganizationTherapist,
+);
 router.patch(
   '/:id/assign-therapist',
   authController.isAdmin,

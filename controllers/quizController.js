@@ -5,8 +5,9 @@ const Quiz = require('../models/quizModel');
 const AnswerSheet = require('../models/16PFAnswerModel');
 const TherapistQuizAssignment = require('../models/therapistQuizAssignmentModel');
 const jwt = require('jsonwebtoken');
+const mongoose = require('mongoose');
 const { promisify } = require('util');
-const calculatePersonalityFactors = require('../utils/calculatePersonalityFactors');
+const { computePersonalityFactorsFromPayload } = require('../utils/calculatePersonalityFactors');
 
 exports.createQuiz = catchAsync(async (req, res, next) => {
   const { type } = req.body;
@@ -194,7 +195,7 @@ exports.createQuiz = catchAsync(async (req, res, next) => {
 
 exports.submitQuiz = catchAsync(async (req, res, next) => {
   try {
-    const { quizId, quizName, quizType, answers } = req.body;
+    const { quizId, quizName, quizType, answers, assignmentId } = req.body;
 
     if (!quizId || !quizName || !quizType || !answers) {
       return res.status(400).json({ message: 'Missing required fields' });
@@ -224,17 +225,46 @@ exports.submitQuiz = catchAsync(async (req, res, next) => {
     }
     console.log(freshUser);
 
-    freshUser.attemptedQuizzes.forEach((i) => {
-      if (i.toString() === quizId) {
-        return next(new AppError('User has already given the test', 403));
+    let selectedAssignment = null;
+    const hasAssignmentContext =
+      typeof assignmentId === 'string' && assignmentId.trim().length > 0;
+
+    if (hasAssignmentContext) {
+      if (!mongoose.Types.ObjectId.isValid(assignmentId)) {
+        return next(new AppError('Invalid assignmentId.', 400));
       }
-    });
+
+      selectedAssignment = await TherapistQuizAssignment.findOne({
+        _id: assignmentId,
+        user: decoded.id,
+        quiz: quizId,
+      });
+
+      if (!selectedAssignment) {
+        return next(new AppError('Quiz assignment not found for this user.', 404));
+      }
+
+      if (selectedAssignment.status === 'completed') {
+        return next(new AppError('This quiz assignment is already completed.', 400));
+      }
+
+      if (selectedAssignment.status === 'revoked') {
+        return next(new AppError('This quiz assignment has been revoked.', 400));
+      }
+    } else {
+      for (const attemptedQuizId of freshUser.attemptedQuizzes || []) {
+        if (String(attemptedQuizId) === String(quizId)) {
+          return next(new AppError('User has already given the test', 403));
+        }
+      }
+    }
 
     const newAnswerSheet = new AnswerSheet({
       quizId,
       quizName,
       quizType,
       userId,
+      assignmentId: hasAssignmentContext ? assignmentId : undefined,
       answers,
     });
 
@@ -245,34 +275,37 @@ exports.submitQuiz = catchAsync(async (req, res, next) => {
       { new: true, runValidators: false } // skip validation
     );
 
-    const latestActiveAssignment = await TherapistQuizAssignment.findOne({
-      user: decoded.id,
-      quiz: quizId,
-      status: { $in: ['assigned', 'in_progress'] },
-    }).sort({ assignedAt: -1 });
+    const assignmentToComplete =
+      selectedAssignment
+      || (await TherapistQuizAssignment.findOne({
+        user: decoded.id,
+        quiz: quizId,
+        status: { $in: ['assigned', 'in_progress'] },
+      }).sort({ assignedAt: -1 }));
 
-    if (latestActiveAssignment) {
+    if (assignmentToComplete) {
       const now = new Date();
-      latestActiveAssignment.status = 'completed';
-      if (!latestActiveAssignment.startedAt) {
-        latestActiveAssignment.startedAt = now;
+      assignmentToComplete.status = 'completed';
+      if (!assignmentToComplete.startedAt) {
+        assignmentToComplete.startedAt = now;
       }
-      latestActiveAssignment.completedAt = now;
-      await latestActiveAssignment.save({ validateBeforeSave: false });
+      assignmentToComplete.completedAt = now;
+      await assignmentToComplete.save({ validateBeforeSave: false });
     }
 
+    let calculatedResult = null;
     if (savedAnswerSheet && quizType === 'poll PF') {
-      (async () => {
-        try {
-          await calculatePersonalityFactors(savedAnswerSheet);
-        } catch (err) {
-          console.error('PF calc error:', err.message);
-        }
-      })();
+      try {
+        calculatedResult = computePersonalityFactorsFromPayload(savedAnswerSheet.toObject());
+      } catch (err) {
+        console.error('PF calc error:', err.message);
+      }
     }
     res.status(201).json({
       message: 'Answers submitted successfully',
       data: savedAnswerSheet,
+      assignmentId: assignmentToComplete?._id || null,
+      calculatedResult,
     });
   } catch (error) {
     console.error('Error saving answer sheet:', error);
