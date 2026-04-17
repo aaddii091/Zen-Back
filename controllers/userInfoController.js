@@ -1,5 +1,6 @@
 const catchAsync = require('../utils/catchAsync');
 const UserInfo = require('../models/userInfoModel');
+const User = require('../models/userModel');
 
 const normalizePrimaryConcern = (value) => {
   if (!value) return value;
@@ -95,16 +96,23 @@ exports.getMyInfo = catchAsync(async (req, res) => {
 exports.insertMyInfo = catchAsync(async (req, res) => {
   const updatePayload = buildUpdatePayload(req.body);
 
-  const userInfo = await UserInfo.findOneAndUpdate(
-    { user: req.user._id },
-    { $set: updatePayload, $setOnInsert: { user: req.user._id } },
-    {
-      new: true,
-      upsert: true,
-      runValidators: true,
-      setDefaultsOnInsert: true,
-    },
-  );
+  const [userInfo] = await Promise.all([
+    UserInfo.findOneAndUpdate(
+      { user: req.user._id },
+      { $set: updatePayload, $setOnInsert: { user: req.user._id } },
+      {
+        new: true,
+        upsert: true,
+        runValidators: true,
+        setDefaultsOnInsert: true,
+      },
+    ),
+    User.findByIdAndUpdate(
+      req.user._id,
+      { $set: { hasOnboarded: true } },
+      { new: false, runValidators: false },
+    ),
+  ]);
 
   res.status(200).json({
     status: 'success',
