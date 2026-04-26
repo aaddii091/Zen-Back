@@ -38,6 +38,16 @@ router.post('/getQuizByID', authController.getQuizByID);
 router.get('/me', authController.protect, authController.getMe);
 router.get('/my-session-overview', authController.protect, authController.getMySessionOverview);
 router.get(
+  '/recommendation-test/status',
+  authController.protect,
+  authController.getRecommendationTestStatus,
+);
+router.post(
+  '/recommendation-test/submit',
+  authController.protect,
+  authController.submitRecommendationTest,
+);
+router.get(
   '/my-assigned-clients',
   authController.isTherapist,
   authController.getMyAssignedClients,

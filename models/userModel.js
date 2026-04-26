@@ -20,6 +20,33 @@ const userSchema = new mongoose.Schema({
     type: Boolean,
     default: false,
   },
+  hasCompletedRecommendationTest: {
+    type: Boolean,
+    default: false,
+  },
+  recommendationTestCompletedAt: {
+    type: Date,
+    default: null,
+  },
+  recommendationTestResult: {
+    category: {
+      type: String,
+      enum: [
+        'study_coach_recommended',
+        'professional_therapist_recommended',
+      ],
+    },
+    totalScore: {
+      type: Number,
+      min: 32,
+      max: 160,
+    },
+    factorScores: {
+      type: Map,
+      of: Number,
+    },
+    submittedAt: Date,
+  },
   assignedTherapist: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
