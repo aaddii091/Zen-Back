@@ -84,6 +84,11 @@ router.post(
   authController.redeemTherapistInvite,
 );
 router.post(
+  '/preview-therapist-invite',
+  authController.protect,
+  authController.previewTherapistInvite,
+);
+router.post(
   '/select-organization-therapist',
   authController.protect,
   authController.selectOrganizationTherapist,

@@ -719,6 +719,33 @@ exports.redeemTherapistInvite = catchAsync(async (req, res, next) => {
   });
 });
 
+exports.previewTherapistInvite = catchAsync(async (req, res, next) => {
+  if (req.user.role !== 'user') {
+    return next(new AppError('Only users can preview therapist invites.', 403));
+  }
+
+  const rawCode = String(req.body?.code || '').trim().toUpperCase();
+  if (!rawCode) {
+    return next(new AppError('Invite code is required.', 400));
+  }
+
+  const therapistProfile = await TherapistProfile.findOne({
+    inviteCode: rawCode,
+    inviteCodeActive: { $ne: false },
+  }).lean();
+
+  if (!therapistProfile) {
+    return next(new AppError('Invite code not found or inactive.', 404));
+  }
+
+  res.status(200).json({
+    status: 'success',
+    data: {
+      inviteCode: rawCode,
+    },
+  });
+});
+
 exports.getMe = catchAsync(async (req, res) => {
   res.status(200).json({
     status: 'success',
