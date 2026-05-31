@@ -3,11 +3,24 @@ const TherapistProfile = require('../models/therapistProfileModel');
 const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/appError');
 
+const toBufferSafe = (value) => {
+  if (!value) return null;
+  if (Buffer.isBuffer(value)) return value;
+  if (Array.isArray(value)) return Buffer.from(value);
+  if (value?.type === 'Buffer' && Array.isArray(value?.data)) {
+    return Buffer.from(value.data);
+  }
+  if (value?.buffer && Array.isArray(value?.buffer)) {
+    return Buffer.from(value.buffer);
+  }
+  return null;
+};
+
 const buildTherapistPhotoUrl = (profile) => {
-  const data = profile?.photo?.data;
+  const data = toBufferSafe(profile?.photo?.data);
   const contentType = profile?.photo?.contentType;
   if (!data || !contentType) return '';
-  const base64 = Buffer.from(data).toString('base64');
+  const base64 = data.toString('base64');
   return `data:${contentType};base64,${base64}`;
 };
 
@@ -26,6 +39,9 @@ const mapRosterItem = (therapistUser, therapistProfile) => ({
   isDemoProfile: Boolean(therapistProfile?.isDemoProfile),
 });
 
+const generateOrganizationLegacyId = () =>
+  `ORG-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
+
 exports.createOrganization = catchAsync(async (req, res, next) => {
   const { organizationName, joinCode, therapistRoster } = req.body;
   if (!organizationName) {
@@ -38,6 +54,8 @@ exports.createOrganization = catchAsync(async (req, res, next) => {
     : [];
 
   const organization = await Organization.create({
+    organizationId: generateOrganizationLegacyId(),
+    name: organizationName,
     organizationName,
     joinCode: normalizedCode || undefined,
     therapistRoster: roster,
@@ -64,7 +82,10 @@ exports.updateOrganization = catchAsync(async (req, res, next) => {
   const { organizationName, joinCode, joinCodeActive, therapistRoster } = req.body;
   const updates = {};
 
-  if (organizationName) updates.organizationName = organizationName;
+  if (organizationName) {
+    updates.organizationName = organizationName;
+    updates.name = organizationName;
+  }
   if (joinCode !== undefined) {
     updates.joinCode = String(joinCode || '').trim().toUpperCase();
   }
@@ -157,7 +178,7 @@ exports.getMyTherapistRoster = catchAsync(async (req, res, next) => {
   const therapistIds = therapistUsers.map((item) => item._id);
   const therapistProfiles = await TherapistProfile.find({
     user: { $in: therapistIds },
-  }).lean();
+  });
 
   const profileMap = new Map(
     therapistProfiles.map((profile) => [String(profile.user), profile]),

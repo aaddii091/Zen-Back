@@ -15,8 +15,8 @@ const mongoose = require('mongoose');
 const { promisify } = require('util');
 const crypto = require('crypto');
 
-const signToken = (id) => {
-  return jwt.sign({ id }, process.env.JWT_SECRET, {
+const signToken = (payload) => {
+  return jwt.sign(payload, process.env.JWT_SECRET, {
     expiresIn: process.env.JWT_EXPIRES_IN,
   });
 };
@@ -467,7 +467,10 @@ exports.login = catchAsync(async (req, res, next) => {
   if (!user || !(await user.correctPassword(password, user.password))) {
     return next(new AppError('User or Password is Wrong ', 401));
   }
-  const token = signToken(user._id);
+  const token = signToken({
+    id: user._id,
+    sessionVersion: Number(user.sessionVersion || 0),
+  });
   res.status(200).json({
     status: 'success',
     message: 'Logged In Successfully',
@@ -497,7 +500,10 @@ exports.signUp = catchAsync(async (req, res, next) => {
     role,
   });
 
-  const token = signToken(newUser._id);
+  const token = signToken({
+    id: newUser._id,
+    sessionVersion: Number(newUser.sessionVersion || 0),
+  });
 
   // Send a success response
   res.status(200).json({
@@ -531,8 +537,18 @@ exports.protect = catchAsync(async (req, res, next) => {
       new AppError('The user belonging to this token does no longer exist'),
     );
   }
+  if (freshUser.suspended) {
+    return next(new AppError('Your account is suspended. Please contact support.', 403));
+  }
+  if (
+    decoded.sessionVersion !== undefined &&
+    Number(decoded.sessionVersion) !== Number(freshUser.sessionVersion || 0)
+  ) {
+    return next(new AppError('Session expired. Please log in again.', 401));
+  }
 
   req.user = freshUser;
+  req.impersonator = decoded.impersonatedBy || null;
   next();
 });
 exports.isAdmin = catchAsync(async (req, res, next) => {
@@ -553,6 +569,18 @@ exports.isAdmin = catchAsync(async (req, res, next) => {
 
   const freshUser = await User.findById(decoded.id);
   console.log(freshUser);
+  if (!freshUser) {
+    return next(new AppError('The user belonging to this token no longer exists.', 401));
+  }
+  if (freshUser.suspended) {
+    return next(new AppError('Your account is suspended. Please contact support.', 403));
+  }
+  if (
+    decoded.sessionVersion !== undefined &&
+    Number(decoded.sessionVersion) !== Number(freshUser.sessionVersion || 0)
+  ) {
+    return next(new AppError('Session expired. Please log in again.', 401));
+  }
   if (freshUser.role !== 'admin') {
     return next(new AppError('The user is not an admin'));
   }
@@ -581,6 +609,15 @@ exports.isTherapist = catchAsync(async (req, res, next) => {
   console.log(freshUser);
   if (!freshUser || freshUser.role !== 'therapist') {
     return next(new AppError('The user is not a therapist', 403));
+  }
+  if (freshUser.suspended) {
+    return next(new AppError('Your account is suspended. Please contact support.', 403));
+  }
+  if (
+    decoded.sessionVersion !== undefined &&
+    Number(decoded.sessionVersion) !== Number(freshUser.sessionVersion || 0)
+  ) {
+    return next(new AppError('Session expired. Please log in again.', 401));
   }
 
   req.user = freshUser;
@@ -1594,7 +1631,10 @@ exports.resetPassword = catchAsync(async (req, res, next) => {
   user.passwordResetExpires = undefined;
   await user.save();
 
-  const token = signToken(user._id);
+  const token = signToken({
+    id: user._id,
+    sessionVersion: Number(user.sessionVersion || 0),
+  });
   res.status(200).json({
     status: 'success',
     token,
@@ -1611,7 +1651,10 @@ exports.updatePassword = catchAsync(async (req, res, next) => {
     user.passwordConfirm = req.body.newPasswordConfirm;
     await user.save();
   }
-  const token = signToken(user._id);
+  const token = signToken({
+    id: user._id,
+    sessionVersion: Number(user.sessionVersion || 0),
+  });
   res.status(200).json({
     status: 'success',
     message: 'Logged In Successfully',

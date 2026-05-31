@@ -10,6 +10,25 @@ const userSchema = new mongoose.Schema({
   },
   // New users should not receive admin rights automatically
   role: { type: String, enum: ['admin', 'user', 'therapist'], default: 'user' },
+  orgRole: {
+    type: String,
+    enum: ['student', 'therapist', 'coach', 'org_admin', ''],
+    default: '',
+  },
+  suspended: {
+    type: Boolean,
+    default: false,
+  },
+  suspensionReason: {
+    type: String,
+    trim: true,
+    default: '',
+  },
+  sessionVersion: {
+    type: Number,
+    default: 0,
+    min: 0,
+  },
   hasOnboarded: { type: Boolean, default: false },
   organization: {
     type: mongoose.Schema.Types.ObjectId,
