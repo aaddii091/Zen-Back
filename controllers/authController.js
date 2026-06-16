@@ -507,6 +507,31 @@ exports.isTherapist = catchAsync(async (req, res, next) => {
   next();
 });
 
+exports.isCareerCounselor = catchAsync(async (req, res, next) => {
+  let token;
+  if (
+    req.headers.authorization &&
+    req.headers.authorization.startsWith('Bearer')
+  ) {
+    token = req.headers.authorization.split(' ')[1];
+  }
+
+  if (!token) {
+    return next(
+      new AppError('You are not logged in! Please log in to get access.', 401),
+    );
+  }
+  const decoded = await promisify(jwt.verify)(token, process.env.JWT_SECRET);
+
+  const freshUser = await User.findById(decoded.id);
+  if (!freshUser || (freshUser.role !== 'career_counselor' && freshUser.role !== 'admin')) {
+    return next(new AppError('Access restricted to career counselors', 403));
+  }
+
+  req.user = freshUser;
+  next();
+});
+
 exports.assignTherapistToUser = catchAsync(async (req, res, next) => {
   const { id } = req.params;
   const { therapistUserId } = req.body;

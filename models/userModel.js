@@ -9,7 +9,7 @@ const userSchema = new mongoose.Schema({
     required: [true, 'Please tell us your name!'],
   },
   // New users should not receive admin rights automatically
-  role: { type: String, enum: ['admin', 'user', 'therapist'], default: 'user' },
+  role: { type: String, enum: ['admin', 'user', 'therapist', 'career_counselor'], default: 'user' },
   hasOnboarded: { type: Boolean, default: false },
   organization: {
     type: mongoose.Schema.Types.ObjectId,
