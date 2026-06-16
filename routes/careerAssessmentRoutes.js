@@ -7,7 +7,9 @@ router.post('/start', authController.protect, careerAssessmentController.startOr
 router.patch('/phase1', authController.protect, careerAssessmentController.savePhase1);
 router.patch('/phase2', authController.protect, careerAssessmentController.savePhase2);
 router.get('/my-report', authController.protect, careerAssessmentController.getMyReport);
+router.get('/my-counselor', authController.protect, careerAssessmentController.getMyCounselor);
 router.post('/book', authController.protect, careerAssessmentController.bookSession);
 router.get('/all', authController.protect, authController.isCareerCounselor, careerAssessmentController.getAllAssessments);
+router.patch('/:userId/assign-counselor', authController.protect, authController.isCareerCounselor, careerAssessmentController.assignCounselor);
 
 module.exports = router;

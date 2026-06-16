@@ -2,6 +2,7 @@ const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/appError');
 const CareerAssessment = require('../models/careerAssessmentModel');
 const User = require('../models/userModel');
+const TherapistProfile = require('../models/therapistProfileModel');
 
 const generateReportWithAI = async ({ phase1, phase2 }) => {
   if (!process.env.OPENAI_API_KEY) {
@@ -186,6 +187,57 @@ exports.bookSession = catchAsync(async (req, res, next) => {
   res.status(200).json({
     status: 'success',
     data: assessment,
+  });
+});
+
+exports.getMyCounselor = catchAsync(async (req, res, next) => {
+  const user = await User.findById(req.user._id).select('assignedCareerCounselor');
+  if (!user?.assignedCareerCounselor) {
+    return res.status(200).json({ status: 'success', data: null });
+  }
+
+  const profile = await TherapistProfile.findOne({ user: user.assignedCareerCounselor }).lean();
+  if (!profile) return res.status(200).json({ status: 'success', data: null });
+
+  const counselorUser = await User.findById(user.assignedCareerCounselor).select('name email').lean();
+
+  const photoUrl = (() => {
+    const d = profile?.photo?.data;
+    const ct = profile?.photo?.contentType;
+    if (!d || !ct) return '';
+    return `data:${ct};base64,${Buffer.from(d).toString('base64')}`;
+  })();
+
+  res.status(200).json({
+    status: 'success',
+    data: {
+      counselorUserId: String(user.assignedCareerCounselor),
+      displayName: profile.displayName || counselorUser?.name || 'Career Counselor',
+      title: profile.title || 'Career Counselor',
+      bio: profile.bio || '',
+      specializations: profile.specializations || [],
+      languages: profile.languages || [],
+      sessionModes: profile.sessionModes || [],
+      calendlyUrl: profile.calendlyUrl || '',
+      availabilityStatus: profile.availabilityStatus || '',
+      photoUrl,
+    },
+  });
+});
+
+exports.assignCounselor = catchAsync(async (req, res, next) => {
+  const { userId } = req.params;
+  const counselorId = req.user._id;
+
+  const targetUser = await User.findById(userId);
+  if (!targetUser) return next(new AppError('User not found', 404));
+
+  targetUser.assignedCareerCounselor = counselorId;
+  await targetUser.save({ validateBeforeSave: false });
+
+  res.status(200).json({
+    status: 'success',
+    message: 'Career counselor assigned successfully',
   });
 });
 

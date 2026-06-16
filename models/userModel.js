@@ -25,6 +25,11 @@ const userSchema = new mongoose.Schema({
     ref: 'User',
     default: null,
   },
+  assignedCareerCounselor: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    default: null,
+  },
   accessibleQuizzes: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Quiz' }],
   attemptedQuizzes: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Quiz' }],
   email: {
