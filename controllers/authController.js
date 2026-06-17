@@ -392,12 +392,14 @@ exports.login = catchAsync(async (req, res, next) => {
     message: 'Logged In Successfully',
     token: token,
     role: user.role,
+    roles: user.roles?.length ? user.roles : [user.role],
     hasOnboarded: user.hasOnboarded,
     user: {
       id: user._id,
       name: user.name,
       email: user.email,
       role: user.role,
+      roles: user.roles?.length ? user.roles : [user.role],
     },
   });
 });
@@ -524,12 +526,49 @@ exports.isCareerCounselor = catchAsync(async (req, res, next) => {
   const decoded = await promisify(jwt.verify)(token, process.env.JWT_SECRET);
 
   const freshUser = await User.findById(decoded.id);
-  if (!freshUser || !['career_counselor', 'therapist', 'admin'].includes(freshUser.role)) {
+  const hasAccess =
+    freshUser &&
+    (freshUser.roles?.includes('career_counselor') ||
+      freshUser.role === 'career_counselor' ||
+      freshUser.roles?.includes('admin') ||
+      freshUser.role === 'admin');
+
+  if (!hasAccess) {
     return next(new AppError('Access restricted to career counselors', 403));
   }
 
   req.user = freshUser;
   next();
+});
+
+// Admin: add or remove a role from a user's roles[]
+exports.updateUserRoles = catchAsync(async (req, res, next) => {
+  const { id } = req.params;
+  const { addRole, removeRole } = req.body;
+
+  const validRoles = ['admin', 'user', 'therapist', 'career_counselor'];
+
+  const user = await User.findById(id);
+  if (!user) return next(new AppError('User not found', 404));
+
+  if (addRole) {
+    if (!validRoles.includes(addRole))
+      return next(new AppError(`Invalid role: ${addRole}`, 400));
+    if (!user.roles.includes(addRole)) user.roles.push(addRole);
+  }
+
+  if (removeRole) {
+    if (removeRole === user.role)
+      return next(new AppError('Cannot remove primary role. Change role field instead.', 400));
+    user.roles = user.roles.filter((r) => r !== removeRole);
+  }
+
+  await user.save({ validateBeforeSave: false });
+
+  res.status(200).json({
+    status: 'success',
+    data: { id: user._id, role: user.role, roles: user.roles },
+  });
 });
 
 exports.assignTherapistToUser = catchAsync(async (req, res, next) => {

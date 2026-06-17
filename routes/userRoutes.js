@@ -84,4 +84,10 @@ router.patch(
   authController.assignTherapistToUser
 );
 
+router.patch(
+  '/:id/roles',
+  authController.isAdmin,
+  authController.updateUserRoles
+);
+
 module.exports = router;

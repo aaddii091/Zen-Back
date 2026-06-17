@@ -10,6 +10,10 @@ const userSchema = new mongoose.Schema({
   },
   // New users should not receive admin rights automatically
   role: { type: String, enum: ['admin', 'user', 'therapist', 'career_counselor'], default: 'user' },
+  roles: {
+    type: [{ type: String, enum: ['admin', 'user', 'therapist', 'career_counselor'] }],
+    default: [],
+  },
   hasOnboarded: { type: Boolean, default: false },
   organization: {
     type: mongoose.Schema.Types.ObjectId,
@@ -81,6 +85,14 @@ userSchema.methods.createPasswordResetToken = async function () {
   this.passwordResetExpires = Date.now() + 10 * 60 * 1000;
   return resetToken;
 };
+
+// Keep roles[] in sync — primary role is always present in the array
+userSchema.pre('save', function (next) {
+  if (this.role && !this.roles.includes(this.role)) {
+    this.roles.push(this.role);
+  }
+  next();
+});
 
 userSchema.pre('save', async function (next) {
   // Only run this function if password was actually modified
