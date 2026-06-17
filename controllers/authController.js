@@ -524,7 +524,7 @@ exports.isCareerCounselor = catchAsync(async (req, res, next) => {
   const decoded = await promisify(jwt.verify)(token, process.env.JWT_SECRET);
 
   const freshUser = await User.findById(decoded.id);
-  if (!freshUser || (freshUser.role !== 'career_counselor' && freshUser.role !== 'admin')) {
+  if (!freshUser || !['career_counselor', 'therapist', 'admin'].includes(freshUser.role)) {
     return next(new AppError('Access restricted to career counselors', 403));
   }
 
