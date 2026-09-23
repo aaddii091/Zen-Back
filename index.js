@@ -12,6 +12,12 @@ const therapyChatRoutes = require('./routes/therapyChatRoutes');
 const aiTherapyRoutes = require('./routes/aiTherapyRoutes');
 const therapistSessionReportRoutes = require('./routes/therapistSessionReportRoutes');
 const shortCourseProgressRoutes = require('./routes/shortCourseProgressRoutes');
+const careerAssessmentRoutes = require('./routes/careerAssessmentRoutes');
+const studyCounselingRoutes = require('./routes/studyCounselingRoutes');
+const classroomRoutes = require('./routes/classroomRoutes');
+const referralRoutes = require('./routes/referralRoutes');
+const classroomTransferRoutes = require('./routes/classroomTransferRoutes');
+const teacherInviteRoutes = require('./routes/teacherInviteRoutes');
 
 const AppError = require('./utils/appError');
 const globalErrorHandler = require('./controllers/errorController');
@@ -71,6 +77,12 @@ app.use('/api/v1/therapy-chat', therapyChatRoutes);
 app.use('/api/v1/ai-therapy', aiTherapyRoutes);
 app.use('/api/v1/therapist-session-reports', therapistSessionReportRoutes);
 app.use('/api/v1/short-courses', shortCourseProgressRoutes);
+app.use('/api/v1/career-assessment', careerAssessmentRoutes);
+app.use('/api/v1/study-counseling', studyCounselingRoutes);
+app.use('/api/v1/classrooms', classroomRoutes);
+app.use('/api/v1/referrals', referralRoutes);
+app.use('/api/v1/classroom-transfers', classroomTransferRoutes);
+app.use('/api/v1/teacher-invites', teacherInviteRoutes);
 
 // 404 handler
 app.all('*', (req, res, next) => {
