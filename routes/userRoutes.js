@@ -90,4 +90,7 @@ router.patch(
   authController.updateUserRoles
 );
 
+router.get('/recommendation-test/status', authController.protect, authController.getRecommendationTestStatus);
+router.post('/recommendation-test/submit', authController.protect, authController.submitRecommendationTest);
+
 module.exports = router;

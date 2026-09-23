@@ -9,6 +9,9 @@ const Appointment = require('./../models/appointmentModel');
 const UserInfo = require('./../models/userInfoModel');
 const TherapistQuizAssignment = require('./../models/therapistQuizAssignmentModel');
 const Organization = require('../models/organizationModel');
+const TeacherInvite = require('../models/teacherInviteModel');
+const Classroom = require('../models/classroomModel');
+const Referral = require('../models/referralModel');
 const { computePersonalityFactorsFromPayload } = require('../utils/calculatePersonalityFactors');
 const jwt = require('jsonwebtoken');
 const mongoose = require('mongoose');
@@ -404,11 +407,34 @@ exports.login = catchAsync(async (req, res, next) => {
   });
 });
 exports.signUp = catchAsync(async (req, res, next) => {
-  console.log(req.body);
+  const normalizedEmail = String(req.body?.email || '')
+    .trim()
+    .toLowerCase();
+  const intent = String(req.body?.intent || '').trim();
+
+  // The `teacher` role is never asserted by the client. It is resolved server-side
+  // from an admin-written TeacherInvite row. This has to live inside the shared
+  // signup endpoint rather than a separate one: User.email is unique, so a teacher
+  // who signed up through the student app first could otherwise never be provisioned.
+  const invite = normalizedEmail
+    ? await TeacherInvite.findOne({ email: normalizedEmail, status: 'pending' })
+    : null;
+
+  if (intent === 'teacher' && !invite) {
+    return next(
+      new AppError(
+        "This email is not on your school's teacher list. Ask your school administrator to add it.",
+        403,
+      ),
+    );
+  }
+
   const allowedSignupRoles = ['user', 'therapist'];
-  const role = allowedSignupRoles.includes(req.body.role)
-    ? req.body.role
-    : undefined;
+  const role = invite
+    ? 'teacher'
+    : allowedSignupRoles.includes(req.body.role)
+      ? req.body.role
+      : undefined;
 
   const newUser = await User.create({
     name: req.body.name,
@@ -418,13 +444,36 @@ exports.signUp = catchAsync(async (req, res, next) => {
     role,
   });
 
+  if (invite) {
+    newUser.organization = invite.organization;
+    await newUser.save({ validateBeforeSave: false });
+
+    invite.status = 'claimed';
+    invite.claimedBy = newUser._id;
+    invite.claimedAt = new Date();
+    await invite.save();
+
+    if (invite.defaultClassrooms?.length) {
+      await Classroom.updateMany(
+        { _id: { $in: invite.defaultClassrooms } },
+        { $addToSet: { teachers: newUser._id } },
+      );
+    }
+  }
+
   const token = signToken(newUser._id);
 
-  // Send a success response
-  res.status(200).json({
+  res.status(201).json({
     status: 'success',
     data: {
-      user: newUser, // Include the newly created user in the response
+      user: {
+        id: newUser._id,
+        name: newUser.name,
+        email: newUser.email,
+        role: newUser.role,
+        roles: newUser.roles?.length ? newUser.roles : [newUser.role],
+        organization: newUser.organization || null,
+      },
       token: token,
     },
   });
@@ -446,7 +495,6 @@ exports.protect = catchAsync(async (req, res, next) => {
   const decoded = await promisify(jwt.verify)(token, process.env.JWT_SECRET);
 
   const freshUser = await User.findById(decoded.id);
-  console.log(freshUser);
   if (!freshUser) {
     return next(
       new AppError('The user belonging to this token does no longer exist'),
@@ -456,6 +504,31 @@ exports.protect = catchAsync(async (req, res, next) => {
   req.user = freshUser;
   next();
 });
+
+// Shared role guard for new surfaces. Requires `protect` upstream, so it costs no
+// extra DB round-trip — unlike the legacy isX guards below, which each re-parse the
+// Bearer header and re-query the user. Those are left alone deliberately: they have
+// already diverged (isAdmin omits its status code and so returns 500 instead of 403;
+// isTherapist uses strict equality and locks out admins), and cloning one would mean
+// picking a bug to inherit. Note restrictTo grants admin, which the legacy guards do
+// inconsistently.
+exports.restrictTo =
+  (...roles) =>
+  (req, res, next) => {
+    if (!req.user) {
+      return next(
+        new AppError('You are not logged in! Please log in to get access.', 401),
+      );
+    }
+    const owned = new Set(
+      [req.user.role, ...(req.user.roles || [])].filter(Boolean),
+    );
+    if (owned.has('admin') || roles.some((r) => owned.has(r))) return next();
+    return next(
+      new AppError('You do not have permission to perform this action.', 403),
+    );
+  };
+
 exports.isAdmin = catchAsync(async (req, res, next) => {
   let token;
   if (
@@ -473,7 +546,6 @@ exports.isAdmin = catchAsync(async (req, res, next) => {
   const decoded = await promisify(jwt.verify)(token, process.env.JWT_SECRET);
 
   const freshUser = await User.findById(decoded.id);
-  console.log(freshUser);
   if (freshUser.role !== 'admin') {
     return next(new AppError('The user is not an admin'));
   }
@@ -499,7 +571,6 @@ exports.isTherapist = catchAsync(async (req, res, next) => {
   const decoded = await promisify(jwt.verify)(token, process.env.JWT_SECRET);
 
   const freshUser = await User.findById(decoded.id);
-  console.log(freshUser);
   if (!freshUser || freshUser.role !== 'therapist') {
     return next(new AppError('The user is not a therapist', 403));
   }
@@ -541,15 +612,56 @@ exports.isCareerCounselor = catchAsync(async (req, res, next) => {
   next();
 });
 
+exports.isStudyCounselor = catchAsync(async (req, res, next) => {
+  let token;
+  if (
+    req.headers.authorization &&
+    req.headers.authorization.startsWith('Bearer')
+  ) {
+    token = req.headers.authorization.split(' ')[1];
+  }
+
+  if (!token) {
+    return next(
+      new AppError('You are not logged in! Please log in to get access.', 401),
+    );
+  }
+  const decoded = await promisify(jwt.verify)(token, process.env.JWT_SECRET);
+
+  const freshUser = await User.findById(decoded.id);
+  const hasAccess =
+    freshUser &&
+    (freshUser.roles?.includes('study_counselor') ||
+      freshUser.role === 'study_counselor' ||
+      freshUser.roles?.includes('admin') ||
+      freshUser.role === 'admin');
+
+  if (!hasAccess) {
+    return next(new AppError('Access restricted to study counselors', 403));
+  }
+
+  req.user = freshUser;
+  next();
+});
+
 // Admin: add or remove a role from a user's roles[]
 exports.updateUserRoles = catchAsync(async (req, res, next) => {
   const { id } = req.params;
-  const { addRole, removeRole } = req.body;
+  const { addRole, removeRole, setRole } = req.body;
 
-  const validRoles = ['admin', 'user', 'therapist', 'career_counselor'];
+  const validRoles = ['admin', 'user', 'teacher', 'therapist', 'career_counselor', 'study_counselor'];
 
   const user = await User.findById(id);
   if (!user) return next(new AppError('User not found', 404));
+
+  // Changing the primary role is the only way to demote a teacher who leaves the
+  // school; nothing else in the codebase can write `role` after creation.
+  if (setRole) {
+    if (!validRoles.includes(setRole))
+      return next(new AppError(`Invalid role: ${setRole}`, 400));
+    user.role = setRole;
+    if (setRole !== 'user') user.classroom = null;
+  }
 
   if (addRole) {
     if (!validRoles.includes(addRole))
@@ -710,8 +822,10 @@ exports.getMe = catchAsync(async (req, res) => {
       name: req.user.name,
       email: req.user.email,
       role: req.user.role,
+      roles: req.user.roles?.length ? req.user.roles : [req.user.role],
       hasOnboarded: req.user.hasOnboarded,
       organization: req.user.organization || null,
+      classroom: req.user.classroom || null,
       hasSelectedOrgTherapist: Boolean(req.user.hasSelectedOrgTherapist),
       assignedTherapist: req.user.assignedTherapist || null,
     },
@@ -1807,5 +1921,172 @@ exports.getQuizByID = catchAsync(async (req, res, next) => {
         }
       : null,
     quiz,
+  });
+});
+
+// ── Recommendation test ─────────────────────────────────────────────────────
+
+const MINI_16PF_QUESTIONS = [
+  { id: 1, trait: 'A', reverse: false }, { id: 2, trait: 'A', reverse: true },
+  { id: 3, trait: 'B', reverse: false }, { id: 4, trait: 'B', reverse: true },
+  { id: 5, trait: 'C', reverse: false }, { id: 6, trait: 'C', reverse: true },
+  { id: 7, trait: 'E', reverse: false }, { id: 8, trait: 'E', reverse: true },
+  { id: 9, trait: 'F', reverse: false }, { id: 10, trait: 'F', reverse: true },
+  { id: 11, trait: 'G', reverse: false }, { id: 12, trait: 'G', reverse: true },
+  { id: 13, trait: 'H', reverse: false }, { id: 14, trait: 'H', reverse: true },
+  { id: 15, trait: 'I', reverse: false }, { id: 16, trait: 'I', reverse: true },
+  { id: 17, trait: 'L', reverse: false }, { id: 18, trait: 'L', reverse: true },
+  { id: 19, trait: 'M', reverse: false }, { id: 20, trait: 'M', reverse: true },
+  { id: 21, trait: 'N', reverse: false }, { id: 22, trait: 'N', reverse: true },
+  { id: 23, trait: 'O', reverse: false }, { id: 24, trait: 'O', reverse: true },
+  { id: 25, trait: 'Q1', reverse: false }, { id: 26, trait: 'Q1', reverse: true },
+  { id: 27, trait: 'Q2', reverse: false }, { id: 28, trait: 'Q2', reverse: true },
+  { id: 29, trait: 'Q3', reverse: false }, { id: 30, trait: 'Q3', reverse: true },
+  { id: 31, trait: 'Q4', reverse: false }, { id: 32, trait: 'Q4', reverse: true },
+];
+
+const scoreRecommendationTest = (answers) => {
+  const traitScores = {};
+
+  for (const q of MINI_16PF_QUESTIONS) {
+    const raw = Number(answers[String(q.id)]);
+    if (!Number.isInteger(raw) || raw < 1 || raw > 5) continue;
+    const score = q.reverse ? (6 - raw) : raw;
+    if (!traitScores[q.trait]) traitScores[q.trait] = 0;
+    traitScores[q.trait] += score;
+  }
+
+  const totalScore = Object.values(traitScores).reduce((sum, v) => sum + v, 0);
+
+  // Emotional stability (C), anxiety/guilt (O), and tension (Q4) are key distress markers.
+  // Low C + high O + high Q4 suggests deeper support needed.
+  const emotionalStability = traitScores['C'] || 0;
+  const anxiety = traitScores['O'] || 0;
+  const tension = traitScores['Q4'] || 0;
+
+  const distressScore = anxiety + tension - emotionalStability;
+
+  const category = distressScore >= 6
+    ? 'professional_therapist_recommended'
+    : 'study_coach_recommended';
+
+  return { category, totalScore, traitScores, distressScore };
+};
+
+// Well above the >= 6 line that merely recommends a counsellor: roughly high
+// anxiety AND high tension AND below-average emotional stability at once
+// (e.g. 8 + 8 - 4). Kept rare on purpose — a flag that fires often stops meaning
+// anything to the therapist who has to triage it.
+const SELF_FLAG_THRESHOLD = 12;
+
+// A screening result this extreme raises a referral into the school's help group.
+// Deliberately best-effort: a failure here must never break the student's result
+// screen, and it must never create a second open referral for a student who
+// already has one (the openKey unique index is the backstop).
+const maybeRaiseSelfAssessmentReferral = async (user, result) => {
+  if (result.distressScore < SELF_FLAG_THRESHOLD) return null;
+  // No organization means no help group to route to. The UI shows crisis
+  // resources instead; there is nobody to escalate to.
+  if (!user.organization) return null;
+
+  const existing = await Referral.findOne({
+    organization: user.organization,
+    openKey: String(user._id),
+  })
+    .select('_id source')
+    .lean();
+  if (existing) return existing;
+
+  const classroom = user.classroom
+    ? await Classroom.findById(user.classroom).select('name grade section').lean()
+    : null;
+
+  const now = new Date();
+  return Referral.create({
+    student: user._id,
+    teacher: null,
+    organization: user.organization,
+    classroom: user.classroom || null,
+    classroomSnapshot: {
+      name: classroom?.name || '',
+      grade: classroom?.grade || '',
+      section: classroom?.section || '',
+    },
+    source: 'self_assessment',
+    urgency: 'high',
+    concernTags: ['anxiety_stress', 'mood_low'],
+    reason:
+      'Raised automatically: this student completed the Support Recommendation Test '
+      + `and scored ${result.distressScore} on the distress marker (threshold ${SELF_FLAG_THRESHOLD}), `
+      + 'indicating high anxiety and tension with low emotional stability. '
+      + 'The student has been told their school\'s help group was notified.',
+    selfAssessment: {
+      instrument: 'mini_16pf',
+      distressScore: result.distressScore,
+      threshold: SELF_FLAG_THRESHOLD,
+      category: result.category,
+      traitScores: result.traitScores,
+      takenAt: now,
+    },
+    statusHistory: [{ status: 'pending', at: now, note: '' }],
+  });
+};
+
+exports.getRecommendationTestStatus = catchAsync(async (req, res) => {
+  const user = await User.findById(req.user._id).select(
+    'hasCompletedRecommendationTest recommendationTestResult',
+  );
+
+  res.status(200).json({
+    status: 'success',
+    data: {
+      hasCompletedRecommendationTest: user?.hasCompletedRecommendationTest || false,
+      recommendationTestResult: user?.recommendationTestResult || null,
+    },
+  });
+});
+
+exports.submitRecommendationTest = catchAsync(async (req, res, next) => {
+  const { answers } = req.body;
+  if (!answers || typeof answers !== 'object') {
+    return next(new AppError('answers object is required', 400));
+  }
+
+  const result = scoreRecommendationTest(answers);
+
+  const user = await User.findByIdAndUpdate(
+    req.user._id,
+    {
+      hasCompletedRecommendationTest: true,
+      recommendationTestResult: {
+        category: result.category,
+        totalScore: result.totalScore,
+        traitScores: result.traitScores,
+        completedAt: new Date(),
+      },
+    },
+    { new: true },
+  );
+
+  let helpGroupNotified = false;
+  try {
+    const referral = await maybeRaiseSelfAssessmentReferral(user, result);
+    helpGroupNotified = Boolean(referral);
+  } catch (err) {
+    // Never fail the student's result screen over this. An E11000 here just means
+    // they already have an open referral, which is the correct outcome anyway.
+    if (err?.code !== 11000) console.error('self-assessment referral failed:', err.message);
+    helpGroupNotified = err?.code === 11000;
+  }
+
+  res.status(200).json({
+    status: 'success',
+    data: {
+      hasCompletedRecommendationTest: true,
+      recommendationTestResult: user.recommendationTestResult,
+      // Drives the disclosure shown to the student — they are always told.
+      helpGroupNotified,
+      canNotifyHelpGroup: Boolean(user.organization),
+    },
   });
 });
