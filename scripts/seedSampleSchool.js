@@ -1,15 +1,16 @@
 /* eslint-disable no-console */
 //
-// Demo data for a live walkthrough. Safe to run against the production cluster.
+// Sample school data for live walkthroughs. Safe to run against the production
+// cluster.
 //
-//   node scripts/seedDemo.js --confirm          create / refresh the demo data
-//   node scripts/seedDemo.js --confirm --wipe   remove it again, and nothing else
+//   node scripts/seedSampleSchool.js --confirm          create / refresh the sample school
+//   node scripts/seedSampleSchool.js --confirm --wipe   remove it again, and nothing else
 //
 // Live-safety rules this script follows:
 //   * It NEVER calls syncIndexes(). That drops any index not declared in a
 //     schema, which on a shared cluster can silently remove someone else's.
 //   * Everything it creates is namespaced to one organization and one email
-//     domain (@demoschool.zengarden.in), so --wipe can remove exactly what it
+//     domain (@greenwoodschool.edu.in), so --wipe can remove exactly what it
 //     made and nothing belonging to a real school.
 //   * It prints the target host and refuses to run without --confirm, because
 //     which database you are on depends on which DATABASE line in config.env is
@@ -28,7 +29,10 @@ const ClassroomTransferRequest = require('../models/classroomTransferRequestMode
 const TherapistProfile = require('../models/therapistProfileModel');
 const UserInfo = require('../models/userInfoModel');
 
-const ORG_NAME = 'Greenwood Public School (Demo)';
+// The school NAME is what appears on the platform, so it carries no "(Demo)"
+// suffix. The domain, join code and password stay as-is deliberately — they are
+// the credentials already in use.
+const ORG_NAME = 'Greenwood Public School';
 const JOIN_CODE = 'DEMO26';
 const YEAR = '2026-27';
 const DOMAIN = 'demoschool.zengarden.in';
@@ -92,7 +96,7 @@ const TEACHERS = [
   {
     local: 'sanjay.verma',
     name: 'Mr. Sanjay Verma',
-    homeOf: 'B', // home teacher of 9-B, so transfer approval is demoable
+    homeOf: 'B', // home teacher of 9-B, so transfer approval can be shown
   },
 ];
 
@@ -137,10 +141,10 @@ const upsertUser = async ({ name, local, role, extra = {} }) => {
 
 const wipe = async () => {
   const org = await Organization.findOne({ organizationName: ORG_NAME });
-  const demoUsers = await User.find({ email: new RegExp(`@${DOMAIN}$`) })
+  const sampleUsers = await User.find({ email: new RegExp(`@${DOMAIN}$`) })
     .select('_id')
     .lean();
-  const ids = demoUsers.map((u) => u._id);
+  const ids = sampleUsers.map((u) => u._id);
 
   const counts = {
     referrals: (await Referral.deleteMany({ student: { $in: ids } })).deletedCount,
@@ -159,7 +163,7 @@ const wipe = async () => {
       : 0,
   };
 
-  console.log('\nremoved (demo data only):');
+  console.log('\nremoved (sample school data only):');
   Object.entries(counts).forEach(([k, v]) => console.log(`  ${k.padEnd(16)}${v}`));
 };
 
@@ -176,8 +180,8 @@ const run = async () => {
       '\nRefusing to run without --confirm.\n'
         + 'Check the target above is the database you mean — which one you get\n'
         + 'depends on the last uncommented DATABASE line in config.env.\n\n'
-        + '  node scripts/seedDemo.js --confirm\n'
-        + '  node scripts/seedDemo.js --confirm --wipe\n',
+        + '  node scripts/seedSampleSchool.js --confirm\n'
+        + '  node scripts/seedSampleSchool.js --confirm --wipe\n',
     );
     process.exit(1);
   }
@@ -495,22 +499,22 @@ const run = async () => {
   console.log('transfers     1 pending, awaiting the 9-B home teacher');
 
   /* ------------------------------------------------------------------ done */
-  console.log('\n─── demo logins ──────────────────────────────────────────────');
+  console.log('\n─── logins ───────────────────────────────────────────────────');
   console.log(`  password for everyone:  ${PASSWORD}\n`);
   console.log('  Control Panel');
   console.log(`    therapist        ${email('dr.meera')}`);
-  console.log(`    therapist (2nd)  ${email('dr.arun')}      (for the claim-race demo)`);
+  console.log(`    therapist (2nd)  ${email('dr.arun')}      (for the claim-race walkthrough)`);
   console.log(`    teacher          ${email('rhea.kapoor')}  (teaches 9-A and 9-B)`);
   console.log(`    home teacher     ${email('sanjay.verma')} (approves 9-B transfers)`);
   console.log('\n  Student app');
   console.log(`    any of:          ${email('aarav.sharma')} … ${email('tara.pillai')}`);
   console.log(`    already flagged  ${email('tara.pillai')}   (self-assessment referral)`);
-  console.log('\n  Provisioning demo');
+  console.log('\n  Provisioning');
   console.log(`    unclaimed invite ${email('new.teacher')}`);
   console.log('      sign this one up live to show role assignment from the school list');
   console.log(`\n  School join code:  ${JOIN_CODE}`);
   console.log('──────────────────────────────────────────────────────────────');
-  console.log('\nreset with:  node scripts/seedDemo.js --confirm --wipe');
+  console.log('\nreset with:  node scripts/seedSampleSchool.js --confirm --wipe');
 
   await mongoose.disconnect();
 };

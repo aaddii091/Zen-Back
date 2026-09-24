@@ -6,7 +6,8 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "nodemon server.js",
-    "seed:classrooms": "node scripts/seedClassrooms.js"
+    "seed:classrooms": "node scripts/seedClassrooms.js",
+    "seed:sample-school": "node scripts/seedSampleSchool.js"
   },
   "author": "",
   "license": "ISC",
