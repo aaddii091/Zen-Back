@@ -32,18 +32,31 @@ const classroomLabel = (classroom) => {
 // The complete set of student fields a teacher may ever read. Never return a raw
 // user document — signUp used to, and that leaked roles, organization and
 // passwordChangedAt automatically as the schema grew.
-const mapStudentForTeacher = (student, classroom, referral) => ({
-  id: student._id,
-  name: student.name,
-  classroomId: classroom?._id || student.classroom || null,
-  classroomName: classroom?.name || '',
-  classroomLabel: classroomLabel(classroom),
-  grade: classroom?.grade || '',
-  section: classroom?.section || '',
-  openReferral: referral
-    ? { id: referral._id, status: referral.status }
-    : null,
-});
+const mapStudentForTeacher = (student, classroom, referral, viewerId) => {
+  // The roster shows an open referral filed by ANY teacher, so a colleague does
+  // not file a duplicate for the same child. But only the teacher who filed it
+  // can open it — "My Referrals" is author-scoped — so flag which it is and
+  // withhold the id otherwise, rather than offering a link that goes nowhere.
+  const isMine =
+    referral && viewerId && String(referral.teacher || '') === String(viewerId);
+
+  return {
+    id: student._id,
+    name: student.name,
+    classroomId: classroom?._id || student.classroom || null,
+    classroomName: classroom?.name || '',
+    classroomLabel: classroomLabel(classroom),
+    grade: classroom?.grade || '',
+    section: classroom?.section || '',
+    openReferral: referral
+      ? {
+          id: isMine ? referral._id : null,
+          status: referral.status,
+          isMine: Boolean(isMine),
+        }
+      : null,
+  };
+};
 
 const mapClassroomForStudent = (classroom) => ({
   id: classroom._id,
@@ -171,7 +184,7 @@ exports.getClassroomStudents = catchAsync(async (req, res, next) => {
         // screening result and must never surface on a teacher's roster.
         source: 'teacher_manual',
       })
-        .select('student status')
+        .select('student status teacher')
         .lean()
     : [];
   const referralByStudent = referrals.reduce((acc, r) => {
@@ -196,7 +209,12 @@ exports.getClassroomStudents = catchAsync(async (req, res, next) => {
       totalPages: Math.max(1, Math.ceil(total / limit)),
     },
     data: students.map((s) =>
-      mapStudentForTeacher(s, classroom, referralByStudent[String(s._id)]),
+      mapStudentForTeacher(
+        s,
+        classroom,
+        referralByStudent[String(s._id)],
+        req.user._id,
+      ),
     ),
   });
 });
@@ -256,7 +274,7 @@ exports.searchMyStudents = catchAsync(async (req, res, next) => {
           openKey: { $type: 'string' },
           source: 'teacher_manual', // see getClassroomStudents
         })
-          .select('student status')
+          .select('student status teacher')
           .lean()
       : [],
   ]);
@@ -284,6 +302,7 @@ exports.searchMyStudents = catchAsync(async (req, res, next) => {
         s,
         classroomById[String(s.classroom)],
         referralByStudent[String(s._id)],
+        req.user._id,
       ),
     ),
   });
