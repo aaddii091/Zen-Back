@@ -1,4 +1,5 @@
 const Organization = require('../models/organizationModel');
+const ClassroomTransferRequest = require('../models/classroomTransferRequestModel');
 const TherapistProfile = require('../models/therapistProfileModel');
 const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/appError');
@@ -133,15 +134,31 @@ exports.redeemOrganizationCode = catchAsync(async (req, res, next) => {
   }
 
   const previousOrganizationId = req.user.organization || null;
+  const switchedOrganization =
+    String(previousOrganizationId || '') !== String(organization._id);
+
   req.user.organization = organization._id;
+
+  // Moving to a different school must not strand classroom membership in the old
+  // one, or leave a transfer request pending against a classroom they have left.
+  if (switchedOrganization) {
+    req.user.classroom = null;
+  }
   await req.user.save({ validateBeforeSave: false });
+
+  if (switchedOrganization) {
+    await ClassroomTransferRequest.updateMany(
+      { student: req.user._id, status: 'pending' },
+      { $set: { status: 'cancelled', decidedAt: new Date() } },
+    );
+  }
 
   res.status(200).json({
     status: 'success',
     data: {
       organizationId: organization._id,
       organizationName: organization.organizationName,
-      alreadyJoined: String(previousOrganizationId || '') === String(organization._id),
+      alreadyJoined: !switchedOrganization,
       hasSelectedOrgTherapist: Boolean(req.user.hasSelectedOrgTherapist),
     },
   });

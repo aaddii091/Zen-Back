@@ -9,25 +9,10 @@ const userSchema = new mongoose.Schema({
     required: [true, 'Please tell us your name!'],
   },
   // New users should not receive admin rights automatically
-  role: { type: String, enum: ['admin', 'user', 'therapist'], default: 'user' },
-  orgRole: {
-    type: String,
-    enum: ['student', 'therapist', 'coach', 'org_admin', ''],
-    default: '',
-  },
-  suspended: {
-    type: Boolean,
-    default: false,
-  },
-  suspensionReason: {
-    type: String,
-    trim: true,
-    default: '',
-  },
-  sessionVersion: {
-    type: Number,
-    default: 0,
-    min: 0,
+  role: { type: String, enum: ['admin', 'user', 'teacher', 'therapist', 'career_counselor', 'study_counselor'], default: 'user' },
+  roles: {
+    type: [{ type: String, enum: ['admin', 'user', 'teacher', 'therapist', 'career_counselor', 'study_counselor'] }],
+    default: [],
   },
   hasOnboarded: { type: Boolean, default: false },
   organization: {
@@ -39,37 +24,35 @@ const userSchema = new mongoose.Schema({
     type: Boolean,
     default: false,
   },
-  hasCompletedRecommendationTest: {
-    type: Boolean,
-    default: false,
-  },
-  recommendationTestCompletedAt: {
-    type: Date,
+  // Single source of truth for classroom membership — a student is in exactly one
+  // classroom at a time. There is deliberately no students[] array on Classroom.
+  classroom: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Classroom',
     default: null,
-  },
-  recommendationTestResult: {
-    category: {
-      type: String,
-      enum: [
-        'study_coach_recommended',
-        'professional_therapist_recommended',
-      ],
-    },
-    totalScore: {
-      type: Number,
-      min: 32,
-      max: 160,
-    },
-    factorScores: {
-      type: Map,
-      of: Number,
-    },
-    submittedAt: Date,
+    index: true,
   },
   assignedTherapist: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
     default: null,
+  },
+  assignedCareerCounselor: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    default: null,
+  },
+  assignedStudyCounselor: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    default: null,
+  },
+  hasCompletedRecommendationTest: { type: Boolean, default: false },
+  recommendationTestResult: {
+    category: { type: String, enum: ['study_coach_recommended', 'professional_therapist_recommended'], default: null },
+    totalScore: { type: Number, default: 0 },
+    traitScores: { type: mongoose.Schema.Types.Mixed, default: {} },
+    completedAt: { type: Date, default: null },
   },
   accessibleQuizzes: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Quiz' }],
   attemptedQuizzes: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Quiz' }],
@@ -122,6 +105,16 @@ userSchema.methods.createPasswordResetToken = async function () {
   this.passwordResetExpires = Date.now() + 10 * 60 * 1000;
   return resetToken;
 };
+
+userSchema.index({ classroom: 1, role: 1 });
+
+// Keep roles[] in sync — primary role is always present in the array
+userSchema.pre('save', function (next) {
+  if (this.role && !this.roles.includes(this.role)) {
+    this.roles.push(this.role);
+  }
+  next();
+});
 
 userSchema.pre('save', async function (next) {
   // Only run this function if password was actually modified
