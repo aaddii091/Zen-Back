@@ -10,8 +10,9 @@
 // Then run:
 //   npm run smoke
 //
-// SAFETY: the runner refuses to start unless DATABASE points at a local host, so a
-// stray run can never wipe Atlas. See assertLocalDatabase below.
+// SAFETY: the runner refuses to start against anything that looks like a hosted or
+// credentialed database, so a stray run can never wipe Atlas. See
+// assertDisposableDatabase below.
 
 const path = require('path');
 const mongoose = require('mongoose');
@@ -33,15 +34,37 @@ process.env.JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '1d';
 process.env.CHAT_ENCRYPTION_KEY =
   process.env.CHAT_ENCRYPTION_KEY || 'a'.repeat(64);
 
-const assertLocalDatabase = () => {
+// The suite drops the database on boot, so the one thing that must never happen
+// is pointing it at Atlas.
+//
+// Stated as a denylist of what a hosted cluster looks like rather than an
+// allowlist of local hostnames: an allowlist also refuses a throwaway Mongo on a
+// container network, which is exactly where this needs to run in CI, and the
+// pressure to loosen it then is what gets the guard deleted entirely.
+const assertDisposableDatabase = () => {
   const uri = String(process.env.DATABASE || '');
-  const isLocal =
-    uri.includes('127.0.0.1') ||
-    uri.includes('localhost') ||
-    uri.includes('mongodb://mongo');
-  if (!isLocal) {
+  const redacted = uri.replace(/\/\/[^@]*@/, '//<redacted>@');
+
+  if (!uri) throw new Error('DATABASE is not set.');
+
+  // Atlas is always mongodb+srv:// and/or a *.mongodb.net host. Any managed
+  // provider reached over TLS is equally off-limits.
+  const hosted =
+    uri.startsWith('mongodb+srv://') ||
+    /mongodb\.net/i.test(uri) ||
+    /[?&]tls=true/i.test(uri) ||
+    /[?&]ssl=true/i.test(uri);
+
+  if (hosted) {
     throw new Error(
-      `Refusing to run smoke tests against a non-local database: ${uri.replace(/\/\/[^@]*@/, '//<redacted>@')}`,
+      `Refusing to run smoke tests against what looks like a hosted database: ${redacted}`,
+    );
+  }
+
+  // Credentials are another strong signal this is not a throwaway.
+  if (/\/\/[^/@]+@/.test(uri)) {
+    throw new Error(
+      `Refusing to run smoke tests against a database that requires credentials: ${redacted}`,
     );
   }
 };
@@ -99,7 +122,7 @@ const api = async (method, routePath, { token, body, raw } = {}) => {
 /* ----------------------------------------------------------------- boot */
 
 const boot = async () => {
-  assertLocalDatabase();
+  assertDisposableDatabase();
 
   await mongoose.connect(process.env.DATABASE, {
     serverSelectionTimeoutMS: 5000,
