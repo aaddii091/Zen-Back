@@ -11,6 +11,8 @@ const {
   ensureTeacherClassroom,
   teacherClassroomIds,
   approvableClassroomIds,
+  ensureOrgCounsellor,
+  requireSchoolAdminOrg,
 } = require('../utils/orgScope');
 
 const parsePositiveInt = (value, fallback, max) => {
@@ -412,12 +414,18 @@ exports.joinClassroom = catchAsync(async (req, res, next) => {
     organization: req.user.organization,
     isActive: true,
   })
-    .select('name grade section academicYear')
+    .select('name grade section academicYear assignedCounsellor')
     .lean();
 
   if (!classroom) return next(new AppError('Classroom not found.', 404));
 
   req.user.classroom = classroom._id;
+  // The school assigns the counsellor, so joining a classroom is what confers
+  // one. A classroom with no counsellor set leaves the student unassigned rather
+  // than clearing an assignment they may already have from elsewhere.
+  if (classroom.assignedCounsellor) {
+    req.user.assignedTherapist = classroom.assignedCounsellor;
+  }
   await req.user.save({ validateBeforeSave: false });
 
   res.status(200).json({
@@ -526,6 +534,66 @@ exports.setHomeTeacher = catchAsync(async (req, res, next) => {
   await classroom.save();
 
   res.status(200).json({ status: 'success', data: classroom });
+});
+
+// PATCH /api/v1/classrooms/:id/counsellor
+//
+// Setting the classroom's counsellor re-points every student in it who was still
+// on the previous counsellor. Students who were individually re-assigned away
+// (admin override, or a referral that moved them) are deliberately left alone —
+// the filter on the old counsellor is what distinguishes the two cases.
+exports.setClassroomCounsellor = catchAsync(async (req, res, next) => {
+  const classroom = await Classroom.findById(req.params.id);
+  if (!classroom) return next(new AppError('Classroom not found.', 404));
+
+  // restrictTo('admin','school_admin') proves the role, not the school. A
+  // school_admin is confined to their own organization; the platform admin is
+  // not. 404 rather than 403, same reason as ensureTeacherClassroom: do not
+  // confirm a classroom exists to someone with no business knowing.
+  const owned = new Set([req.user.role, ...(req.user.roles || [])].filter(Boolean));
+  if (!owned.has('admin')) {
+    const scopedOrg = requireSchoolAdminOrg(req.user);
+    if (String(classroom.organization) !== String(scopedOrg)) {
+      return next(new AppError('Classroom not found.', 404));
+    }
+  }
+
+  const previousCounsellor = classroom.assignedCounsellor;
+
+  // null clears the assignment without touching students already assigned.
+  if (req.body?.counsellorUserId === null) {
+    classroom.assignedCounsellor = null;
+    await classroom.save();
+    return res.status(200).json({
+      status: 'success',
+      data: { classroom, studentsReassigned: 0 },
+    });
+  }
+
+  const counsellorId = await ensureOrgCounsellor({
+    organizationId: classroom.organization,
+    counsellorId: req.body?.counsellorUserId,
+  });
+
+  classroom.assignedCounsellor = counsellorId;
+  await classroom.save();
+
+  const studentFilter = { classroom: classroom._id, role: 'user' };
+  if (previousCounsellor) {
+    studentFilter.assignedTherapist = previousCounsellor;
+  } else {
+    // First time a counsellor is set: adopt only the students who have none.
+    studentFilter.assignedTherapist = null;
+  }
+
+  const { modifiedCount } = await User.updateMany(studentFilter, {
+    $set: { assignedTherapist: counsellorId },
+  });
+
+  res.status(200).json({
+    status: 'success',
+    data: { classroom, studentsReassigned: modifiedCount || 0 },
+  });
 });
 
 // POST /api/v1/classrooms/:id/teachers

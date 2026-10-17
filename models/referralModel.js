@@ -159,6 +159,20 @@ const referralSchema = new mongoose.Schema(
     teacherLastViewedAt: { type: Date, default: null },
     therapistFirstViewedAt: { type: Date, default: null },
 
+    // Who opened this child's case, and when.
+    //
+    // The two timestamps above answer "has anyone looked yet"; they cannot
+    // answer "who looked", which is the question a parent or a regulator asks.
+    // Capped at the most recent ACCESS_LOG_CAP entries so a long-running case
+    // cannot grow the document without bound.
+    accessLog: [
+      {
+        viewer: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+        viewerRole: { type: String, trim: true, default: '' },
+        at: { type: Date, default: Date.now },
+      },
+    ],
+
     source: {
       type: String,
       enum: ['teacher_manual', 'self_assessment'],

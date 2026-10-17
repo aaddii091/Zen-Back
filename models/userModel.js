@@ -8,10 +8,15 @@ const userSchema = new mongoose.Schema({
     type: String,
     required: [true, 'Please tell us your name!'],
   },
-  // New users should not receive admin rights automatically
-  role: { type: String, enum: ['admin', 'user', 'teacher', 'therapist', 'career_counselor', 'study_counselor'], default: 'user' },
+  // New users should not receive admin rights automatically.
+  //
+  // `admin` is the Zengarden platform super-admin. `school_admin` is the top of
+  // one school's own hierarchy — the person a counsellor escalates a case to so
+  // the student's parents can be contacted. They are not the same thing and
+  // school_admin deliberately carries none of admin's cross-organization reach.
+  role: { type: String, enum: ['admin', 'school_admin', 'user', 'teacher', 'therapist', 'career_counselor', 'study_counselor'], default: 'user' },
   roles: {
-    type: [{ type: String, enum: ['admin', 'user', 'teacher', 'therapist', 'career_counselor', 'study_counselor'] }],
+    type: [{ type: String, enum: ['admin', 'school_admin', 'user', 'teacher', 'therapist', 'career_counselor', 'study_counselor'] }],
     default: [],
   },
   hasOnboarded: { type: Boolean, default: false },

@@ -106,6 +106,36 @@ const normalizeSessionModes = (value) => {
     );
 };
 
+// Drop anything malformed rather than storing it. A half-valid window would make
+// the after-hours autoresponder fire at the wrong time, which is worse than the
+// counsellor appearing always-available.
+const normalizeWorkingHours = (input = {}) => {
+  const days = Array.isArray(input?.days) ? input.days : [];
+
+  return {
+    enabled: Boolean(input?.enabled),
+    timezone: String(input?.timezone || '').trim(),
+    days: days
+      .map((day) => ({
+        weekday: Number(day?.weekday),
+        startMinute: Number(day?.startMinute),
+        endMinute: Number(day?.endMinute),
+      }))
+      .filter(
+        (day) =>
+          Number.isInteger(day.weekday) &&
+          day.weekday >= 0 &&
+          day.weekday <= 6 &&
+          Number.isInteger(day.startMinute) &&
+          Number.isInteger(day.endMinute) &&
+          day.startMinute >= 0 &&
+          day.endMinute <= 1439 &&
+          day.endMinute > day.startMinute,
+      )
+      .slice(0, 21), // at most three windows a day
+  };
+};
+
 const buildUpdatePayload = (body = {}) => {
   const payload = {};
 
@@ -128,6 +158,9 @@ const buildUpdatePayload = (body = {}) => {
   if (body.calendlyUrl !== undefined) payload.calendlyUrl = body.calendlyUrl;
   if (body.availabilityStatus !== undefined) {
     payload.availabilityStatus = body.availabilityStatus;
+  }
+  if (body.workingHours !== undefined) {
+    payload.workingHours = normalizeWorkingHours(body.workingHours);
   }
 
   return payload;

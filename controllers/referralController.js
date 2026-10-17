@@ -12,6 +12,7 @@ const {
   ensureTeacherStudent,
   teacherClassroomIds,
 } = require('../utils/orgScope');
+const { recordAccess } = require('../utils/accessLog');
 
 const OPEN_STATUSES = ['pending', 'acknowledged', 'in_progress'];
 
@@ -36,6 +37,15 @@ const classroomLabel = (snapshot) => {
 // What the referring teacher may read back. Deliberately omits closureNote and
 // statusHistory[].note — that split is the entire reason closureSummaryForTeacher
 // exists as a separate field. It also omits the claiming therapist's identity.
+// "Who has seen this" — role and timestamp only. The viewer's identity is in the
+// stored accessLog for an audit, but the strip a teacher sees does not need it.
+const mapAccessLog = (referral, { includeViewerId = false } = {}) =>
+  (referral.accessLog || []).map((entry) => ({
+    viewerRole: entry.viewerRole || '',
+    at: entry.at,
+    ...(includeViewerId ? { viewer: entry.viewer } : {}),
+  }));
+
 const mapReferralForTeacher = (referral) => ({
   id: referral._id,
   student: referral.student?._id
@@ -60,6 +70,7 @@ const mapReferralForTeacher = (referral) => ({
     note: n.note,
     at: n.at,
   })),
+  accessLog: mapAccessLog(referral),
 });
 
 const mapReferralForTherapist = (referral) => ({
@@ -99,6 +110,7 @@ const mapReferralForTherapist = (referral) => ({
   statusHistory: referral.statusHistory || [],
   additionalNotes: referral.additionalNotes || [],
   studentTransferredAt: referral.studentTransferredAt || null,
+  accessLog: mapAccessLog(referral, { includeViewerId: true }),
 });
 
 /* ----------------------------------------------------------------- teacher */
@@ -286,6 +298,7 @@ exports.getMyReferralById = catchAsync(async (req, res, next) => {
     { _id: id },
     { $set: { teacherLastViewedAt: new Date() } },
   );
+  await recordAccess(Referral, id, req.user);
 
   res
     .status(200)
@@ -500,6 +513,7 @@ exports.getReferralForTherapist = catchAsync(async (req, res, next) => {
     referral.therapistFirstViewedAt = new Date();
     await referral.save();
   }
+  await recordAccess(Referral, referral._id, req.user);
 
   res
     .status(200)

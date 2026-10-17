@@ -58,6 +58,12 @@ router.patch(
   authController.restrictTo('admin'),
   classroomController.setHomeTeacher,
 );
+router.patch(
+  '/:id/counsellor',
+  authController.protect,
+  authController.restrictTo('admin', 'school_admin'),
+  classroomController.setClassroomCounsellor,
+);
 router.post(
   '/:id/teachers',
   authController.protect,

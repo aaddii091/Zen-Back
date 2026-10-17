@@ -18,6 +18,8 @@ const classroomRoutes = require('./routes/classroomRoutes');
 const referralRoutes = require('./routes/referralRoutes');
 const classroomTransferRoutes = require('./routes/classroomTransferRoutes');
 const teacherInviteRoutes = require('./routes/teacherInviteRoutes');
+const escalationRoutes = require('./routes/escalationRoutes');
+const counsellorNoteRoutes = require('./routes/counsellorNoteRoutes');
 
 const AppError = require('./utils/appError');
 const globalErrorHandler = require('./controllers/errorController');
@@ -83,6 +85,8 @@ app.use('/api/v1/classrooms', classroomRoutes);
 app.use('/api/v1/referrals', referralRoutes);
 app.use('/api/v1/classroom-transfers', classroomTransferRoutes);
 app.use('/api/v1/teacher-invites', teacherInviteRoutes);
+app.use('/api/v1/escalations', escalationRoutes);
+app.use('/api/v1/counsellor-notes', counsellorNoteRoutes);
 
 // 404 handler
 app.all('*', (req, res, next) => {

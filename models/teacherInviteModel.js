@@ -24,6 +24,15 @@ const teacherInviteSchema = new mongoose.Schema(
       index: true,
     },
     name: { type: String, trim: true, default: '', maxlength: 160 },
+    // Which staff role this invite provisions. Kept on the invite rather than
+    // read from the signup body for the same reason the collection exists at all:
+    // a staff role must only ever originate from a row an admin wrote.
+    role: {
+      type: String,
+      enum: ['teacher', 'school_admin'],
+      default: 'teacher',
+      index: true,
+    },
     status: {
       type: String,
       enum: ['pending', 'claimed', 'revoked'],

@@ -2,11 +2,20 @@ const mongoose = require('mongoose');
 
 const therapyMessageSchema = new mongoose.Schema(
   {
+    // Null for senderType 'system': an automated after-hours reply is not sent by
+    // a person, and attributing it to the counsellor would read to a student in
+    // distress as though the counsellor had personally answered at midnight.
     sender: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
-      required: true,
+      default: null,
       index: true,
+    },
+    senderType: {
+      type: String,
+      enum: ['user', 'therapist', 'system'],
+      default: 'user',
+      required: true,
     },
     textCipher: {
       type: String,

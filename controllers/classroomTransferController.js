@@ -294,6 +294,19 @@ exports.decideTransferRequest = catchAsync(async (req, res, next) => {
   }
 
   if (decision === 'approved') {
+    // The counsellor follows the classroom, so the destination's counsellor is
+    // read first and moves in the same atomic update as the classroom itself —
+    // a student must never be observable in the new classroom while still
+    // assigned to the old classroom's counsellor.
+    const destination = await Classroom.findById(claimed.toClassroom)
+      .select('assignedCounsellor')
+      .lean();
+
+    const move = { classroom: claimed.toClassroom };
+    if (destination?.assignedCounsellor) {
+      move.assignedTherapist = destination.assignedCounsellor;
+    }
+
     // 2. Move the student — one atomic single-document update.
     const moved = await User.findOneAndUpdate(
       {
@@ -301,10 +314,10 @@ exports.decideTransferRequest = catchAsync(async (req, res, next) => {
         classroom: claimed.fromClassroom,
         role: 'user',
       },
-      { $set: { classroom: claimed.toClassroom } },
+      { $set: move },
       { new: true },
     )
-      .select('_id classroom')
+      .select('_id classroom assignedTherapist')
       .lean();
 
     if (!moved) {

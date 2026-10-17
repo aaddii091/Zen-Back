@@ -3,11 +3,20 @@ const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/appError');
 const User = require('../models/userModel');
 const TherapyConversation = require('../models/therapyConversationModel');
+const TherapistProfile = require('../models/therapistProfileModel');
 const {
   decryptChatText,
   encryptChatText,
   isChatEncryptionReady,
 } = require('../utils/chatCrypto');
+const {
+  isWithinWorkingHours,
+  buildAfterHoursMessage,
+} = require('../utils/workingHours');
+
+// A student messaging five times at midnight must not get five identical bot
+// replies. One automated reply per thread per window.
+const AUTO_REPLY_DEBOUNCE_HOURS = 8;
 
 const asObjectIdOrNull = (value) => {
   if (!value || typeof value !== 'string') return null;
@@ -111,11 +120,15 @@ const mapConversationPayload = (conversation, requesterId) => {
         })(),
         id: message?._id,
         sentAt: message?.sentAt || null,
+        senderType: message?.senderType || 'user',
         sender: {
           id: message?.sender?._id || message?.sender || null,
           name: message?.sender?.name || '',
           role: message?.sender?.role || '',
-          isMe: String(message?.sender?._id || message?.sender || '') === String(requesterId),
+          isMe:
+            Boolean(message?.sender) &&
+            String(message?.sender?._id || message?.sender || '') ===
+              String(requesterId),
         },
       }))
     : [];
@@ -136,6 +149,54 @@ const mapConversationPayload = (conversation, requesterId) => {
     },
     messages,
     updatedAt: conversation?.updatedAt || null,
+  };
+};
+
+// A student messaging outside their counsellor's working hours gets an immediate
+// automated reply naming when the counsellor is back, plus the 24/7 crisis lines.
+//
+// Returns the message to append, or null. Every guard here is a reason NOT to
+// send: silence is the safe default, an unwanted bot reply to a distressed child
+// is not.
+const buildAutoReplyIfAfterHours = async ({ context, requester, conversation }) => {
+  // Only ever in response to the student. A counsellor messaging at 11pm is
+  // working late, not triggering their own autoresponder.
+  if (requester.role !== 'user') return null;
+
+  const profile = await TherapistProfile.findOne({ user: context.therapistId })
+    .select('workingHours timezone')
+    .lean();
+
+  if (!profile?.workingHours?.enabled) return null;
+
+  if (
+    isWithinWorkingHours(profile.workingHours, {
+      fallbackTimezone: profile.timezone,
+    })
+  ) {
+    return null;
+  }
+
+  const cutoff = Date.now() - AUTO_REPLY_DEBOUNCE_HOURS * 60 * 60 * 1000;
+  const recentlyAutoReplied = (conversation.messages || []).some(
+    (message) =>
+      message.senderType === 'system' &&
+      message.sentAt &&
+      new Date(message.sentAt).getTime() > cutoff,
+  );
+  if (recentlyAutoReplied) return null;
+
+  // Encrypted with the same key as every other message — an automated reply is
+  // still part of a clinical thread and gets no plaintext exception.
+  return {
+    sender: null,
+    senderType: 'system',
+    ...encryptChatText(
+      buildAfterHoursMessage(profile.workingHours, {
+        fallbackTimezone: profile.timezone,
+      }),
+    ),
+    sentAt: new Date(),
   };
 };
 
@@ -189,9 +250,15 @@ exports.sendMessage = catchAsync(async (req, res, next) => {
   const encrypted = encryptChatText(text);
   conversation.messages.push({
     sender: req.user._id,
+    senderType: req.user.role === 'therapist' ? 'therapist' : 'user',
     ...encrypted,
     sentAt: new Date(),
   });
+
+  const autoReply = await buildAutoReplyIfAfterHours({ context, requester: req.user, conversation });
+  if (autoReply) {
+    conversation.messages.push(autoReply);
+  }
 
   // Keep latest 500 messages per thread to bound document size.
   if (conversation.messages.length > 500) {
@@ -207,13 +274,22 @@ exports.sendMessage = catchAsync(async (req, res, next) => {
     .lean();
 
   const mapped = mapConversationPayload(refreshed, req.user._id);
-  const lastMessage = mapped.messages[mapped.messages.length - 1] || null;
+
+  // The sender's own message is what the client echoes into the thread; the
+  // auto-reply is handed back separately so the UI can style it as automated
+  // rather than mistaking it for the last thing the sender said.
+  const ownMessages = mapped.messages.filter((m) => m.senderType !== 'system');
+  const lastMessage = ownMessages[ownMessages.length - 1] || null;
+  const systemReply = autoReply
+    ? mapped.messages[mapped.messages.length - 1] || null
+    : null;
 
   res.status(201).json({
     status: 'success',
     data: {
       conversationId: mapped.id,
       message: lastMessage,
+      autoReply: systemReply,
       updatedAt: mapped.updatedAt,
     },
   });
