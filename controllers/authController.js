@@ -496,18 +496,22 @@ exports.signUp = catchAsync(async (req, res, next) => {
     .toLowerCase();
   const intent = String(req.body?.intent || '').trim();
 
-  // The `teacher` role is never asserted by the client. It is resolved server-side
-  // from an admin-written TeacherInvite row. This has to live inside the shared
-  // signup endpoint rather than a separate one: User.email is unique, so a teacher
-  // who signed up through the student app first could otherwise never be provisioned.
+  // Staff roles are never asserted by the client. They are resolved server-side
+  // from an admin-written TeacherInvite row, whose `role` field says which staff
+  // role the invite provisions. This has to live inside the shared signup endpoint
+  // rather than a separate one: User.email is unique, so a teacher who signed up
+  // through the student app first could otherwise never be provisioned.
   const invite = normalizedEmail
     ? await TeacherInvite.findOne({ email: normalizedEmail, status: 'pending' })
     : null;
 
-  if (intent === 'teacher' && !invite) {
+  // Both staff intents fail the same way, so an address that is not on the school's
+  // list gets told so rather than silently landing as a student account.
+  const STAFF_INTENTS = new Set(['teacher', 'school_admin']);
+  if (STAFF_INTENTS.has(intent) && !invite) {
     return next(
       new AppError(
-        "This email is not on your school's teacher list. Ask your school administrator to add it.",
+        "This email is not on your school's staff list. Ask your school administrator to add it.",
         403,
       ),
     );
@@ -515,7 +519,7 @@ exports.signUp = catchAsync(async (req, res, next) => {
 
   const allowedSignupRoles = ['user', 'therapist'];
   const role = invite
-    ? 'teacher'
+    ? invite.role || 'teacher'
     : allowedSignupRoles.includes(req.body.role)
       ? req.body.role
       : undefined;
@@ -537,7 +541,10 @@ exports.signUp = catchAsync(async (req, res, next) => {
     invite.claimedAt = new Date();
     await invite.save();
 
-    if (invite.defaultClassrooms?.length) {
+    // Classroom membership is a teaching assignment. A school_admin sits above the
+    // classroom and must not land in `teachers[]` — that array is what grants
+    // roster and referral access in utils/orgScope.js.
+    if (newUser.role === 'teacher' && invite.defaultClassrooms?.length) {
       await Classroom.updateMany(
         { _id: { $in: invite.defaultClassrooms } },
         { $addToSet: { teachers: newUser._id } },
@@ -545,7 +552,13 @@ exports.signUp = catchAsync(async (req, res, next) => {
     }
   }
 
-  const token = signToken(newUser._id);
+  // signToken passes `expiresIn` to jwt.sign, which rejects any payload that is
+  // not a plain object — handing it a bare ObjectId threw, so every signup 500'd
+  // *after* the account had already been created. Same shape as login and reset.
+  const token = signToken({
+    id: newUser._id,
+    sessionVersion: Number(newUser.sessionVersion || 0),
+  });
 
   res.status(201).json({
     status: 'success',
@@ -1007,56 +1020,20 @@ exports.submitRecommendationTest = catchAsync(async (req, res, next) => {
   });
 });
 
+// Retired: schools now assign counsellors per classroom
+// (Classroom.assignedCounsellor), so a student has no choice to make.
+//
+// The route is kept and answers 410 rather than being deleted, because an
+// already-installed student app still has the old selector screen in its bundle
+// and a 404 there would surface as a generic network failure instead of an
+// explanation.
 exports.selectOrganizationTherapist = catchAsync(async (req, res, next) => {
-  if (req.user.role !== 'user') {
-    return next(new AppError('Only users can select organization therapists.', 403));
-  }
-
-  const therapistUserId = String(req.body?.therapistUserId || '').trim();
-  if (!therapistUserId) {
-    return next(new AppError('therapistUserId is required.', 400));
-  }
-
-  if (!req.user.organization) {
-    return next(new AppError('Join an organization before selecting a therapist.', 400));
-  }
-
-  if (req.user.hasSelectedOrgTherapist) {
-    return next(new AppError('Therapist selection is locked after your first choice.', 400));
-  }
-
-  const organization = await Organization.findById(req.user.organization)
-    .select('therapistRoster')
-    .lean();
-
-  if (!organization) {
-    return next(new AppError('Organization not found.', 404));
-  }
-
-  const isInRoster = Array.isArray(organization.therapistRoster) && organization.therapistRoster
-    .some((item) => String(item) === therapistUserId);
-
-  if (!isInRoster) {
-    return next(new AppError('Selected therapist is not part of your organization.', 403));
-  }
-
-  const therapistUser = await User.findById(therapistUserId).select('role');
-  if (!therapistUser || therapistUser.role !== 'therapist') {
-    return next(new AppError('Selected therapist is invalid.', 404));
-  }
-
-  req.user.assignedTherapist = therapistUser._id;
-  req.user.hasSelectedOrgTherapist = true;
-  await req.user.save({ validateBeforeSave: false });
-
-  res.status(200).json({
-    status: 'success',
-    data: {
-      userId: req.user._id,
-      assignedTherapist: therapistUser._id,
-      hasSelectedOrgTherapist: true,
-    },
-  });
+  return next(
+    new AppError(
+      'Your school assigns your counsellor. Speak to your school if you need a change.',
+      410,
+    ),
+  );
 });
 
 exports.getMyAssignedClients = catchAsync(async (req, res, next) => {

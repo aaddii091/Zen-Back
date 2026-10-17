@@ -26,6 +26,26 @@ const requireOrganization = (user) => {
   return user.organization;
 };
 
+// A school_admin is bound to exactly one school, the same way a teacher is —
+// User.organization, set from the invite at signup. Deliberately NOT the
+// therapistRoster indirection below: a school admin belongs to one school and must
+// never acquire the multi-school reach a rostered therapist has.
+const requireSchoolAdminOrg = (user) => {
+  const owned = new Set(
+    [user?.role, ...(user?.roles || [])].filter(Boolean),
+  );
+  if (!owned.has('school_admin') && !owned.has('admin')) {
+    throw new AppError('Only a school admin can access this.', 403);
+  }
+  if (!user?.organization) {
+    throw new AppError(
+      'Your admin account is not linked to a school yet. Contact Zengarden support.',
+      400,
+    );
+  }
+  return user.organization;
+};
+
 // Therapists do NOT. Nothing in the codebase ever sets User.organization for a
 // therapist — redeemOrganizationCode is the only writer and it is gated to
 // role === 'user'. Therapists are bound to schools only through
@@ -107,6 +127,39 @@ const ensureTeacherStudent = async ({ teacherId, studentId }) => {
   return student;
 };
 
+// A classroom's counsellor must be a therapist on that school's roster.
+//
+// Deliberately a helper called from the setter rather than a Classroom pre('save')
+// hook: a hook would need a DB round-trip on every classroom write and, worse,
+// would not fire for findOneAndUpdate — the same trap referralModel.js:201-202
+// documents. One setter, one check, no silent gap.
+const ensureOrgCounsellor = async ({ organizationId, counsellorId }) => {
+  const id = asObjectIdOrNull(counsellorId);
+  if (!id) throw new AppError('A valid counsellorUserId is required.', 400);
+
+  const counsellor = await User.findById(id).select('role roles').lean();
+  const isTherapist =
+    counsellor &&
+    (counsellor.role === 'therapist' ||
+      (counsellor.roles || []).includes('therapist'));
+  if (!isTherapist) {
+    throw new AppError('That user is not a counsellor.', 400);
+  }
+
+  const onRoster = await Organization.exists({
+    _id: organizationId,
+    therapistRoster: id,
+  });
+  if (!onRoster) {
+    throw new AppError(
+      'That counsellor is not on this school’s roster.',
+      400,
+    );
+  }
+
+  return id;
+};
+
 const assertSameOrg = (a, b) => {
   if (String(a || '') !== String(b || '')) {
     throw new AppError('This record belongs to a different school.', 403);
@@ -160,10 +213,12 @@ module.exports = {
   asObjectIdOrNull,
   escapeRegex,
   requireOrganization,
+  requireSchoolAdminOrg,
   resolveTherapistOrgIds,
   ensureTeacherClassroom,
   teacherClassroomIds,
   approvableClassroomIds,
   ensureTeacherStudent,
+  ensureOrgCounsellor,
   assertSameOrg,
 };

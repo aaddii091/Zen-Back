@@ -189,13 +189,22 @@ exports.getMyTherapistRoster = catchAsync(async (req, res, next) => {
     return next(new AppError('Organization not found.', 404));
   }
 
+  // Only ever the student's OWN counsellor. The full roster used to be returned
+  // so the student could pick from it; schools assign per classroom now, and
+  // shipping the whole roster would be a staff directory leak for no purpose.
+  const assignedId = req.user.assignedTherapist || null;
   const therapistUsers = (organization.therapistRoster || []).filter(
-    (item) => item?.role === 'therapist',
+    (item) =>
+      item?.role === 'therapist' &&
+      assignedId &&
+      String(item._id) === String(assignedId),
   );
-  const therapistIds = therapistUsers.map((item) => item._id);
-  const therapistProfiles = await TherapistProfile.find({
-    user: { $in: therapistIds },
-  });
+
+  const therapistProfiles = therapistUsers.length
+    ? await TherapistProfile.find({
+        user: { $in: therapistUsers.map((item) => item._id) },
+      })
+    : [];
 
   const profileMap = new Map(
     therapistProfiles.map((profile) => [String(profile.user), profile]),
@@ -211,8 +220,11 @@ exports.getMyTherapistRoster = catchAsync(async (req, res, next) => {
         id: organization._id,
         name: organization.organizationName,
       },
-      hasSelectedOrgTherapist: Boolean(req.user.hasSelectedOrgTherapist),
-      selectedTherapistId: req.user.assignedTherapist || null,
+      // Assignment is no longer a choice. Kept in the payload so an un-updated
+      // client still renders "you have a counsellor" rather than an empty state.
+      hasSelectedOrgTherapist: Boolean(assignedId),
+      assignmentMode: 'school_assigned',
+      selectedTherapistId: assignedId,
       roster,
     },
   });

@@ -69,9 +69,18 @@ const normalizeEntries = (body) => {
   return [];
 };
 
+const INVITE_ROLES = new Set(['teacher', 'school_admin']);
+
 // Shared by the JSON and CSV intake paths. Idempotent upserts keyed on
 // { organization, email }, so re-uploading the same roster is a no-op.
-const ingestInvites = async ({ organizationId, entries, actor }) => {
+const ingestInvites = async ({
+  organizationId,
+  entries,
+  actor,
+  role = 'teacher',
+  classroomIds,
+}) => {
+  const inviteRole = INVITE_ROLES.has(role) ? role : 'teacher';
   const result = {
     created: 0,
     alreadyPending: 0,
@@ -80,9 +89,10 @@ const ingestInvites = async ({ organizationId, entries, actor }) => {
     invalid: [],
   };
 
-  const defaultClassrooms = Array.isArray(entries.classroomIds)
-    ? entries.classroomIds
-    : [];
+  // `entries` is the array of rows, so `entries.classroomIds` was always
+  // undefined and a body-level classroomIds was silently dropped. It arrives as
+  // its own argument now; per-entry classroomIds still wins over it below.
+  const defaultClassrooms = Array.isArray(classroomIds) ? classroomIds : [];
 
   for (const entry of entries) {
     const { email, name, row } = entry;
@@ -126,9 +136,9 @@ const ingestInvites = async ({ organizationId, entries, actor }) => {
         continue;
       }
 
-      existingUser.role = 'teacher';
+      existingUser.role = inviteRole;
       existingUser.organization = organizationId;
-      existingUser.classroom = null; // a teacher is never a classroom member
+      existingUser.classroom = null; // staff are never classroom members
       await existingUser.save({ validateBeforeSave: false }); // .save() so roles[] syncs
 
       await TeacherInvite.findOneAndUpdate(
@@ -138,6 +148,7 @@ const ingestInvites = async ({ organizationId, entries, actor }) => {
             organization: organizationId,
             email,
             name,
+            role: inviteRole,
             status: 'claimed',
             defaultClassrooms: classrooms,
             invitedBy: actor._id,
@@ -150,7 +161,10 @@ const ingestInvites = async ({ organizationId, entries, actor }) => {
         { upsert: true },
       );
 
-      if (classrooms.length) {
+      // Only a teacher joins `teachers[]`; that array is what grants classroom
+      // roster access in utils/orgScope.js, and a school_admin is scoped by
+      // organization instead.
+      if (inviteRole === 'teacher' && classrooms.length) {
         await Classroom.updateMany(
           { _id: { $in: classrooms } },
           { $addToSet: { teachers: existingUser._id } },
@@ -169,6 +183,7 @@ const ingestInvites = async ({ organizationId, entries, actor }) => {
             organization: organizationId,
             email,
             name,
+            role: inviteRole,
             status: 'pending',
             defaultClassrooms: classrooms,
             invitedBy: actor._id,
@@ -221,6 +236,10 @@ exports.createTeacherInvites = catchAsync(async (req, res, next) => {
     organizationId,
     entries,
     actor: req.user,
+    role: req.body?.role,
+    classroomIds: (req.body?.classroomIds || [])
+      .map(asObjectIdOrNull)
+      .filter(Boolean),
   });
 
   res.status(201).json({ status: 'success', data: result });
@@ -252,6 +271,11 @@ exports.createTeacherInvitesFromCsv = catchAsync(async (req, res, next) => {
     organizationId,
     entries,
     actor: req.user,
+    role: req.body?.role || req.query?.role,
+    classroomIds: String(req.body?.classroomIds || '')
+      .split(',')
+      .map((v) => asObjectIdOrNull(v.trim()))
+      .filter(Boolean),
   });
 
   res.status(201).json({ status: 'success', data: result });

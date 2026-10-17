@@ -102,6 +102,27 @@ const therapistProfileSchema = new mongoose.Schema(
       enum: ['available', 'busy', 'offline'],
       default: 'available',
     },
+
+    // When this counsellor is reachable, used to decide whether a student
+    // messaging them gets an immediate automated reply with crisis resources.
+    //
+    // Minutes-from-midnight rather than "09:00" strings: no parsing, no
+    // ambiguity, and a trivial comparison. `enabled` defaults to false so the
+    // feature ships dark and a counsellor opts in once their hours are right —
+    // an auto-reply fired from wrong hours is worse than none at all.
+    workingHours: {
+      enabled: { type: Boolean, default: false },
+      // Falls back to the profile `timezone` above when blank.
+      timezone: { type: String, trim: true, default: '' },
+      days: [
+        {
+          _id: false,
+          weekday: { type: Number, min: 0, max: 6 }, // 0 = Sunday
+          startMinute: { type: Number, min: 0, max: 1439 },
+          endMinute: { type: Number, min: 0, max: 1439 },
+        },
+      ],
+    },
     inviteCode: {
       type: String,
       trim: true,

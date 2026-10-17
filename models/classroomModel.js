@@ -38,6 +38,21 @@ const classroomSchema = new mongoose.Schema(
     },
     teachers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
 
+    // The counsellor every student in this classroom is assigned to. Schools
+    // assign counsellors like form tutors; students do not choose their own.
+    //
+    // This is the SOURCE of the assignment, not the lookup path. The resolved
+    // value is copied onto User.assignedTherapist, which is what every read
+    // already keys off (chat, notes, booking, ensureTherapistClientAccess).
+    // Resolving through the classroom on every read would mean rewriting all of
+    // those and would break the moment a student sits outside a classroom.
+    assignedCounsellor: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+      index: true,
+    },
+
     isActive: { type: Boolean, default: true, index: true },
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
