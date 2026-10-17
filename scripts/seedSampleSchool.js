@@ -274,10 +274,16 @@ const run = async () => {
     classroom.teachers = [teachers['rhea.kapoor']._id, teachers['sanjay.verma']._id];
     const homeOwner = TEACHERS.find((t) => t.homeOf === section);
     classroom.homeTeacher = homeOwner ? teachers[homeOwner.local]._id : null;
+    // Counsellors are assigned per classroom, and every student in the class
+    // inherits it. One counsellor each so the demo has two active caseloads and
+    // an approved transfer visibly moves a student from one to the other.
+    classroom.assignedCounsellor =
+      section === 'A' ? therapists[0]._id : therapists[1]._id;
     await classroom.save();
     classrooms[section] = classroom;
     console.log(
-      `classroom     ${name}${homeOwner ? `  (home teacher ${teachers[homeOwner.local].email})` : '  (no home teacher — fallback path)'}`,
+      `classroom     ${name}  counsellor ${section === 'A' ? therapists[0].email : therapists[1].email}` +
+        `${homeOwner ? `  (home teacher ${teachers[homeOwner.local].email})` : '  (no home teacher, fallback path)'}`,
     );
   }
 
@@ -483,6 +489,29 @@ const run = async () => {
   );
 
   console.log('referrals     5 (pending, acknowledged, in progress, closed, self-flagged)');
+
+  /* ------------------------------------------- counsellor inherited by class */
+  //
+  // Runs last on purpose. The referrals above pin six students to a specific
+  // counsellor, and this must not overwrite them: a student already working with
+  // someone is never silently re-pointed. Only students nobody claimed inherit
+  // their classroom's counsellor, which is exactly what setClassroomCounsellor
+  // does in the app, and it leaves 9-B holding three of Meera's students as the
+  // visible proof of that rule.
+  let inherited = 0;
+  for (const section of ['A', 'B']) {
+    const room = classrooms[section];
+    const { modifiedCount } = await User.updateMany(
+      {
+        classroom: room._id,
+        role: 'user',
+        $or: [{ assignedTherapist: null }, { assignedTherapist: { $exists: false } }],
+      },
+      { $set: { assignedTherapist: room.assignedCounsellor } },
+    );
+    inherited += modifiedCount || 0;
+  }
+  console.log(`counsellors   ${inherited} student(s) inherited theirs from their class`);
 
   /* ------------------------------------------------- a transfer to approve */
   const mover = students['ananya.iyer'];
