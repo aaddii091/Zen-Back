@@ -32,7 +32,7 @@ const CRISIS_RESOURCES = [
 
 const asPlainLines = () =>
   CRISIS_RESOURCES.map(
-    (resource) => `${resource.name} — ${resource.phone} (${resource.detail})`,
+    (resource) => `${resource.name}: ${resource.phone} (${resource.detail})`,
   );
 
 module.exports = { CRISIS_RESOURCES, asPlainLines };
