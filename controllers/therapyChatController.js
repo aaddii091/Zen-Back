@@ -294,3 +294,63 @@ exports.sendMessage = catchAsync(async (req, res, next) => {
     },
   });
 });
+
+// GET /api/v1/therapy-chat/previews
+//
+// One request for the whole message list, replacing one getThread per client.
+// The panel was firing N requests just to render N one-line previews, each of
+// which decrypted an entire thread and, because getThread upserts, created an
+// empty conversation document for every client it touched.
+//
+// Only the last message of each thread is decrypted, and nothing is created.
+exports.getThreadPreviews = catchAsync(async (req, res, next) => {
+  if (req.user.role !== 'therapist') {
+    return next(new AppError('Only therapists can list message previews.', 403));
+  }
+  if (!isChatEncryptionReady()) {
+    throw new AppError(
+      'Secure chat encryption is not configured. Set CHAT_ENCRYPTION_KEY in backend env.',
+      500,
+    );
+  }
+
+  // Slice to the last message server-side so a 500-message thread does not
+  // travel over the wire to produce a 60-character preview.
+  const conversations = await TherapyConversation.aggregate([
+    { $match: { therapist: req.user._id } },
+    {
+      $project: {
+        user: 1,
+        updatedAt: 1,
+        count: { $size: { $ifNull: ['$messages', []] } },
+        last: { $slice: [{ $ifNull: ['$messages', []] }, -1] },
+      },
+    },
+  ]);
+
+  const data = conversations.map((c) => {
+    const last = (c.last || [])[0];
+    let text = '';
+    if (last) {
+      try {
+        text = decryptChatText(last);
+      } catch {
+        text = '[Unable to decrypt message]';
+      }
+    }
+    return {
+      userId: c.user,
+      messageCount: c.count || 0,
+      lastMessage: last
+        ? {
+            text: String(text).slice(0, 120),
+            sentAt: last.sentAt || null,
+            senderType: last.senderType || 'user',
+          }
+        : null,
+      updatedAt: c.updatedAt || null,
+    };
+  });
+
+  res.status(200).json({ status: 'success', results: data.length, data });
+});
