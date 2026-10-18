@@ -123,6 +123,22 @@ const STUDENTS = [
 
 const daysAgo = (n) => new Date(Date.now() - n * 24 * 60 * 60 * 1000);
 
+// Mon-Fri 09:00-17:00 IST. Minutes from midnight, matching therapistProfileModel.
+//
+// Seeded deliberately: the after-hours auto-reply only fires when the
+// counsellor has working hours enabled, so a profile without them silently
+// turns the feature off. A reset would otherwise look successful while leaving
+// a shipped feature dark until someone noticed a student got no reply.
+const WORKING_HOURS = {
+  enabled: true,
+  timezone: 'Asia/Kolkata',
+  days: [1, 2, 3, 4, 5].map((weekday) => ({
+    weekday,
+    startMinute: 9 * 60,
+    endMinute: 17 * 60,
+  })),
+};
+
 // insertMany would skip the bcrypt pre('save') hook, and passwordConfirm is
 // required on create, so every user goes through new User(...) + .save().
 const upsertUser = async ({ name, local, role, extra = {} }) => {
@@ -280,11 +296,13 @@ const run = async () => {
     const user = await upsertUser({ name: t.name, local: t.local, role: 'therapist' });
     await TherapistProfile.findOneAndUpdate(
       { user: user._id },
-      { $set: { user: user._id, ...t.profile } },
+      { $set: { user: user._id, ...t.profile, workingHours: WORKING_HOURS } },
       { upsert: true, new: true, setDefaultsOnInsert: true },
     );
     therapists.push(user);
-    console.log(`therapist     ${user.email}  (${t.profile.title})`);
+    console.log(
+      `therapist     ${user.email}  (${t.profile.title}, Mon-Fri 09:00-17:00 IST)`,
+    );
   }
   await Organization.updateOne(
     { _id: org._id },
