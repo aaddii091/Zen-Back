@@ -103,8 +103,12 @@ exports.createNote = catchAsync(async (req, res, next) => {
   });
 
   const body = String(req.body?.body || '').trim();
-  if (!body) {
-    return next(new AppError('A note needs some text.', 400));
+  // A photo of a page of handwritten notes is a note on its own, so text is not
+  // required when one is on its way. The upload is signed against this note's
+  // id, so the note has to exist before the photo can be sent.
+  const attachmentPending = req.body?.attachmentPending === true;
+  if (!body && !attachmentPending) {
+    return next(new AppError('A note needs some text, or a photo.', 400));
   }
 
   const noteAt = req.body?.noteAt ? new Date(req.body.noteAt) : new Date();

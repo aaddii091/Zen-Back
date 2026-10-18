@@ -66,14 +66,10 @@ const counsellorNoteSchema = new mongoose.Schema(
 counsellorNoteSchema.index({ counsellor: 1, student: 1, noteAt: -1 });
 counsellorNoteSchema.index({ student: 1, visibleToTeacher: 1, noteAt: -1 });
 
-// A note with neither text nor a photo is not a note.
-counsellorNoteSchema.pre('validate', function (next) {
-  const hasBody = String(this.body || '').trim().length > 0;
-  const hasAttachment = (this.attachments || []).length > 0;
-  if (!hasBody && !hasAttachment) {
-    return next(new Error('A note needs either text or an attachment.'));
-  }
-  next();
-});
+// A note needs text or a photo, but it is allowed to have neither for the few
+// seconds between being created and its photo finishing upload: the upload is
+// presigned against the note's own id, so the note must exist first. The
+// controller only permits that empty state when the client declares an incoming
+// attachment, and rolls the note back if the upload fails.
 
 module.exports = mongoose.model('CounsellorNote', counsellorNoteSchema);
