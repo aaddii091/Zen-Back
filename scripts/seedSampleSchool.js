@@ -5,12 +5,13 @@
 //
 //   node scripts/seedSampleSchool.js --confirm          create / refresh the sample school
 //   node scripts/seedSampleSchool.js --confirm --wipe   remove it again, and nothing else
+//   node scripts/seedSampleSchool.js --confirm --wipe --dry-run   count what --wipe would remove
 //
 // Live-safety rules this script follows:
 //   * It NEVER calls syncIndexes(). That drops any index not declared in a
 //     schema, which on a shared cluster can silently remove someone else's.
 //   * Everything it creates is namespaced to one organization and one email
-//     domain (@greenwoodschool.edu.in), so --wipe can remove exactly what it
+//     domain (@demoschool.zengarden.in), so --wipe can remove exactly what it
 //     made and nothing belonging to a real school.
 //   * It prints the target host and refuses to run without --confirm, because
 //     which database you are on depends on which DATABASE line in config.env is
@@ -28,6 +29,10 @@ const TeacherInvite = require('../models/teacherInviteModel');
 const ClassroomTransferRequest = require('../models/classroomTransferRequestModel');
 const TherapistProfile = require('../models/therapistProfileModel');
 const UserInfo = require('../models/userInfoModel');
+const TherapyConversation = require('../models/therapyConversationModel');
+const CounsellorNote = require('../models/counsellorNoteModel');
+const Escalation = require('../models/escalationModel');
+const { isStorageReady, deleteObject } = require('../utils/r2Storage');
 
 // The school NAME is what appears on the platform, so it carries no "(Demo)"
 // suffix. The domain, join code and password stay as-is deliberately — they are
@@ -139,32 +144,80 @@ const upsertUser = async ({ name, local, role, extra = {} }) => {
   return user;
 };
 
-const wipe = async () => {
+// Removing the sample school means removing everything keyed to its users, not
+// just the records this script creates. Chat threads, notes and escalations are
+// written by people using the demo, so they are not in the seed's own output but
+// they do point at these user ids: leaving them behind turns every re-seed into
+// a layer of documents referencing users that no longer exist.
+//
+// --dry-run counts instead of deleting, so the blast radius can be read before
+// anything is irreversible.
+const wipe = async ({ dryRun = false } = {}) => {
   const org = await Organization.findOne({ organizationName: ORG_NAME });
   const sampleUsers = await User.find({ email: new RegExp(`@${DOMAIN}$`) })
     .select('_id')
     .lean();
   const ids = sampleUsers.map((u) => u._id);
 
+  // Collect attachment keys BEFORE the note documents go: the key is the only
+  // record that an R2 object exists, so deleting the rows first strands the
+  // objects in the bucket with nothing left pointing at them.
+  const notes = await CounsellorNote.find({ student: { $in: ids } })
+    .select('attachments.r2Key')
+    .lean();
+  const r2Keys = notes
+    .flatMap((n) => (n.attachments || []).map((a) => a.r2Key))
+    .filter(Boolean);
+
+  const sweep = async (model, filter) => (dryRun
+    ? model.countDocuments(filter)
+    : model.deleteMany(filter).then((r) => r.deletedCount));
+
   const counts = {
-    referrals: (await Referral.deleteMany({ student: { $in: ids } })).deletedCount,
-    transfers: (await ClassroomTransferRequest.deleteMany({ student: { $in: ids } }))
-      .deletedCount,
-    invites: (await TeacherInvite.deleteMany({ email: new RegExp(`@${DOMAIN}$`) }))
-      .deletedCount,
-    profiles: (await TherapistProfile.deleteMany({ user: { $in: ids } })).deletedCount,
-    userInfos: (await UserInfo.deleteMany({ user: { $in: ids } })).deletedCount,
-    classrooms: org
-      ? (await Classroom.deleteMany({ organization: org._id })).deletedCount
-      : 0,
-    users: (await User.deleteMany({ _id: { $in: ids } })).deletedCount,
+    referrals: await sweep(Referral, { student: { $in: ids } }),
+    transfers: await sweep(ClassroomTransferRequest, { student: { $in: ids } }),
+    invites: await sweep(TeacherInvite, { email: new RegExp(`@${DOMAIN}$`) }),
+    profiles: await sweep(TherapistProfile, { user: { $in: ids } }),
+    userInfos: await sweep(UserInfo, { user: { $in: ids } }),
+    conversations: await sweep(TherapyConversation, { user: { $in: ids } }),
+    notes: await sweep(CounsellorNote, { student: { $in: ids } }),
+    escalations: await sweep(Escalation, { student: { $in: ids } }),
+    classrooms: org ? await sweep(Classroom, { organization: org._id }) : 0,
+    users: await sweep(User, { _id: { $in: ids } }),
     organizations: org
-      ? (await Organization.deleteOne({ _id: org._id })).deletedCount
+      ? (dryRun ? 1 : (await Organization.deleteOne({ _id: org._id })).deletedCount)
       : 0,
   };
 
-  console.log('\nremoved (sample school data only):');
+  // R2 is a separate system with no transaction shared with Mongo. Deleting
+  // object by object and counting failures is deliberate: a bucket that is
+  // unreachable must not abort the database wipe half way through.
+  let r2Deleted = 0;
+  let r2Failed = 0;
+  if (r2Keys.length && !dryRun) {
+    if (!isStorageReady()) {
+      r2Failed = r2Keys.length;
+    } else {
+      for (const key of r2Keys) {
+        try {
+          await deleteObject({ key });
+          r2Deleted += 1;
+        } catch {
+          r2Failed += 1;
+        }
+      }
+    }
+  }
+
+  console.log(dryRun
+    ? '\nwould remove (sample school data only):'
+    : '\nremoved (sample school data only):');
   Object.entries(counts).forEach(([k, v]) => console.log(`  ${k.padEnd(16)}${v}`));
+  console.log(`  ${'r2 objects'.padEnd(16)}${dryRun ? r2Keys.length : r2Deleted}`);
+  if (r2Failed) {
+    console.log(`\n  WARNING: ${r2Failed} R2 object(s) could not be deleted and are now orphaned.`);
+    r2Keys.forEach((k) => console.log(`    ${k}`));
+  }
 };
 
 const run = async () => {
@@ -190,7 +243,7 @@ const run = async () => {
   console.log('connected to database: ' + mongoose.connection.name + '\n');
 
   if (args.includes('--wipe')) {
-    await wipe();
+    await wipe({ dryRun: args.includes('--dry-run') });
     await mongoose.disconnect();
     return;
   }
