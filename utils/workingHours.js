@@ -134,7 +134,7 @@ const describeNextWindow = (workingHours, { now = new Date(), fallbackTimezone =
 const buildAfterHoursMessage = (workingHours, options = {}) => {
   const next = describeNextWindow(workingHours, options);
   const opening = next
-    ? `Thanks for your message. Your counsellor is not available right now — they are back ${next}, and will see this then.`
+    ? `Thanks for your message. Your counsellor is not available right now. They are back ${next} and will see this then.`
     : 'Thanks for your message. Your counsellor is not available right now and will see this when they are back.';
 
   return [
