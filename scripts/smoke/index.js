@@ -12,6 +12,7 @@ const SUITES = [
   './04-referral-audit',
   './05-after-hours',
   './06-counsellor-notes',
+  './07-quiz-results',
 ];
 
 (async () => {

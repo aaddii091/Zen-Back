@@ -1952,6 +1952,16 @@ exports.getMyQuizAssignmentResult = catchAsync(async (req, res, next) => {
       result,
       submittedAt: answerSheet?.createdAt || null,
       quizType: answerSheet?.quizType || assignment?.quiz?.type || '',
+      // What the counsellor wrote about this result, if they have sent it. The
+      // student is the intended reader, so it travels with their own payload.
+      counsellorNote: assignment?.counsellorNote?.sentAt
+        ? {
+          body: assignment.counsellorNote.body || '',
+          sentAt: assignment.counsellorNote.sentAt,
+          updatedAt: assignment.counsellorNote.updatedAt || null,
+          counsellorName: assignment.therapist?.name || '',
+        }
+        : null,
     },
   });
 });
