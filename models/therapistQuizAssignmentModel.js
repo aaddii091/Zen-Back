@@ -53,6 +53,25 @@ const therapistQuizAssignmentSchema = new mongoose.Schema(
       trim: true,
       maxlength: [1200, 'Assignment note must be at most 1200 characters.'],
     },
+    // The counsellor's write-up of this result, sent to the student. Separate
+    // from `note`, which is the instruction attached when the quiz was handed
+    // out: that one is written before the student answers, this one after.
+    //
+    // Stored on the assignment rather than as a CounsellorNote because it is
+    // about one specific submission, and the student is meant to read it. A
+    // CounsellorNote is the counsellor's own record and is private by default.
+    counsellorNote: {
+      body: {
+        type: String,
+        trim: true,
+        default: '',
+        maxlength: [4000, 'A result note must be at most 4000 characters.'],
+      },
+      sentAt: { type: Date, default: null },
+      sentBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+      updatedAt: { type: Date, default: null },
+    },
+
     source: {
       type: String,
       enum: ['therapist_manual'],
